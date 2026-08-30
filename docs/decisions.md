@@ -206,10 +206,99 @@ every column wastes space and slows writes. Each index here has a stated reason.
 
 ---
 
+# Phase 2 decisions (database-backed backend + Prompt APIs)
+
+## Decision 17 — Layered backend: router → schema → service → repository → SQLAlchemy
+
+**Decision:** Routes stay thin (parse, delegate, return a response schema).
+Business rules and transaction boundaries live in `app/services/`. All
+SQLAlchemy access lives in `app/repositories/` and never commits. Pydantic
+schemas do shape validation only.
+
+**Reason:** Separation of concerns keeps each layer testable and small, and
+makes the transaction boundary explicit and reviewable. It also isolates the
+ORM so a later phase could change persistence without touching routers.
+
+**Trade-off accepted:** More files and a little indirection for simple reads.
+Kept minimal — no generic base-repository / unit-of-work abstractions.
+
+---
+
+## Decision 18 — One engine per process; `get_db` dependency owns the session lifecycle
+
+**Decision:** `app/db/session.py` builds a single `Engine` + `sessionmaker`
+lazily and reuses them. `get_db` is a FastAPI dependency that yields one
+`Session` per request and closes it in a `finally`. Commit/rollback is done by
+the service, not the dependency. `DATABASE_URL` comes from settings and is
+never logged. PostgreSQL only; SQLite is never used.
+
+**Reason:** Creating an engine per request destroys pooling. Letting the
+dependency auto-commit hides transaction boundaries. Keeping commit in the
+service makes the "prompt + Version 1 atomic" rule live in one place.
+
+---
+
+## Decision 19 — `X-Dev-User-ID` header as a temporary, non-auth owner mechanism
+
+**Decision:** Until authentication exists, `POST /api/v1/prompts` reads an
+`X-Dev-User-ID` request header naming an existing `users.user_id`. Missing → 400,
+non-UUID → 400, unknown user → 404. It is documented everywhere (OpenAPI, README,
+`api.md`) as **development-only**. No real user UUID is hard-coded anywhere.
+
+**Reason:** Prompt ownership (`prompts.user_id`, `versions.created_by`) is
+`NOT NULL` in the locked schema, so creation needs a real user. A header keeps
+the mechanism obvious, easily greppable, and trivial to delete when auth lands.
+
+**Explicitly not:** authentication, a session, or any permission grant.
+
+---
+
+## Decision 20 — `search` is lexical (`ILIKE` on title), never called "semantic"
+
+**Decision:** The optional `search` query parameter does a case-insensitive
+substring match on `prompts.title` (`ILIKE '%term%'`, wildcards in the term
+escaped). It is documented as lexical only.
+
+**Reason:** The spec forbids pgvector / semantic search in this phase but allows
+"basic PostgreSQL text matching". `ILIKE` on one column is the least machinery
+that satisfies the list/filter requirement. Full-text (`tsvector`) and semantic
+retrieval are later phases.
+
+---
+
+## Decision 21 — API runs with `debug=False`; all errors go through custom handlers
+
+**Decision:** The FastAPI app is constructed **without** `debug=True` even in
+development. `app/api/errors.py` registers handlers for domain errors,
+`IntegrityError` (→ 409), `SQLAlchemyError` (→ 500), and `Exception` (→ 500),
+all returning `{"detail": …}` with no internal detail.
+
+**Reason:** FastAPI/Starlette debug mode renders raw tracebacks into 500
+responses, which the spec explicitly prohibits (no SQL, credentials, or stack
+traces to clients). Diagnostics are logged server-side instead.
+
+---
+
+## Decision 22 — No version-write endpoints in Phase 2; concurrency documented only
+
+**Decision:** Only read endpoints exist for versions. Version *creation* is not
+exposed. The version-number race (two concurrent "create N+1") is documented as
+a design consideration; correctness is already guaranteed by the Phase 1
+`UNIQUE (prompt_id, version_number)` constraint. No retry/locking is implemented
+and full concurrency control is not claimed.
+
+**Reason:** The spec says to implement the read-only version endpoint and report
+the issue rather than invent version-creation semantics. The prompt-creation
+flow already demonstrates the required transaction architecture.
+
+---
+
 ## Non-decisions (still deferred)
 
 - pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.
 - Neo4j integration and PostgreSQL→graph sync mechanism — later phase.
-- Authentication / password hashing, prompt CRUD APIs, analytics UI — later phases.
+- Authentication / password hashing (replacing `X-Dev-User-ID`), authorization / prompt visibility rules — later phase.
+- Prompt update/delete endpoints, version-creation workflow + its concurrency handling — later phase.
+- Full-text or semantic search; cursor pagination; rate limiting — later phases.
 - Denormalized read models / materialized views — only if a real workload needs them.
-- Production deployment configuration — later phase.
+- Production deployment + production CORS configuration — later phase.

@@ -75,12 +75,15 @@ cd backend
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # Windows
 # ./.venv/bin/pip install -r requirements-dev.txt                   # macOS/Linux
+# DATABASE_URL must point at the Phase 1 schema (see .env.example)
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-- Health check: <http://localhost:8000/health>
-- API docs: <http://localhost:8000/docs>
-- Tests: `./.venv/Scripts/python.exe -m pytest`
+- Liveness: <http://localhost:8000/health> · DB readiness: <http://localhost:8000/health/db>
+- API (v1): <http://localhost:8000/api/v1/prompts> · docs: <http://localhost:8000/docs>
+- Tests (need a real PostgreSQL test DB):
+  `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
+- Full endpoint reference: [`docs/api.md`](docs/api.md)
 
 ### 3. Frontend (Node 20+)
 
@@ -116,6 +119,18 @@ behavior, `CHECK` constraints, justified B-tree indexes, `TIMESTAMPTZ`
 timestamps, deterministic seed data, and a PostgreSQL-backed test suite
 (15 mandated schema checks + extras).
 
+### Phase 2 — database-backed backend + Prompt API ✅
+Layered FastAPI backend (router → schema → service → repository → SQLAlchemy)
+over the **unchanged** Phase 1 schema. Per-request DB session dependency;
+`GET /health` + `GET /health/db`; `POST/GET /api/v1/prompts`,
+`GET /api/v1/prompts/{id}`, `GET /api/v1/prompts/{id}/versions`. Creating a
+prompt writes the prompt **and its Version 1** in one transaction (rollback
+tested). Versions are read-only/immutable. Pagination + lexical `title` search.
+Uniform error bodies (no SQL/credentials/traces). CORS allow-list.
+`X-Dev-User-ID` is a **development-only** owner mechanism, **not** auth. See
+[`docs/api.md`](docs/api.md). No schema change, no new migration.
+
 ### Not started (by design)
-pgvector / embeddings / semantic search, Neo4j integration, authentication,
-prompt CRUD APIs, dashboard, analytics UI, production deployment.
+Authentication / JWT / OAuth (replacing `X-Dev-User-ID`), prompt update/delete,
+version creation, pgvector / embeddings / semantic search, Neo4j integration,
+dashboard, analytics UI, production deployment.

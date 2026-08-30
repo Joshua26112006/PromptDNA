@@ -14,13 +14,14 @@ different engine.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -111,3 +112,85 @@ def db(pg_engine: Engine) -> Session:
         session.close()
         trans.rollback()
         connection.close()
+
+
+# --------------------------------------------------------------------------- #
+# API-test fixtures                                                          #
+# --------------------------------------------------------------------------- #
+# `txn_connection`, `db_session`, and `client` all bind to ONE connection with
+# ONE outer transaction that is rolled back at the end of each test. Sessions
+# created on it use SAVEPOINTs, so a service that calls `commit()` is exercised
+# for real, yet nothing is persisted to the test database.
+@pytest.fixture
+def txn_connection(pg_engine: Engine) -> Iterator[Connection]:
+    connection = pg_engine.connect()
+    trans = connection.begin()
+    try:
+        yield connection
+    finally:
+        trans.rollback()
+        connection.close()
+
+
+@pytest.fixture
+def _session_factory(txn_connection: Connection) -> sessionmaker[Session]:
+    return sessionmaker(
+        bind=txn_connection,
+        join_transaction_mode="create_savepoint",
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
+
+
+@pytest.fixture
+def db_session(_session_factory: sessionmaker[Session]) -> Iterator[Session]:
+    """A session on the shared connection — for arranging test data."""
+
+    session = _session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
+def client(_session_factory: sessionmaker[Session]):
+    """A ``TestClient`` whose ``get_db`` dependency uses the shared connection."""
+
+    from fastapi.testclient import TestClient
+
+    from app.db.session import get_db
+    from app.main import app
+
+    def _override_get_db() -> Iterator[Session]:
+        session = _session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
+    # raise_server_exceptions=False so 500 responses are returned, not re-raised.
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def dev_user(db_session: Session):
+    """An existing user whose UUID can be passed as ``X-Dev-User-ID``."""
+
+    import uuid
+
+    from app.db.models import User
+
+    user = User(
+        name="Dev User",
+        email=f"dev-{uuid.uuid4().hex[:10]}@promptdna.test",
+        password_hash="placeholder-not-a-real-hash",
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user

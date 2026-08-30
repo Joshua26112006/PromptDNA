@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/core/config.py -> repo root is three parents up.
@@ -33,10 +34,21 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
     api_v1_prefix: str = "/api/v1"
+    log_level: str = "INFO"
 
     # -- PostgreSQL: system of record (relational + pgvector) -----------
-    # Optional in Phase 0 — there is no schema yet.
+    # Required from Phase 2 onward for anything database-backed.
     database_url: str | None = None
+
+    # SQLAlchemy engine pool sizing (kept modest for local development).
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_echo: bool = False
+
+    # -- CORS ----------------------------------------------------------
+    # Comma-separated list of allowed browser origins for local frontend dev.
+    # NEVER set this to "*" while credentials are enabled.
+    cors_origins: str = "http://localhost:3000"
 
     # -- Neo4j: supporting graph projection (not used in Phase 0) -------
     neo4j_uri: str | None = None
@@ -48,6 +60,20 @@ class Settings(BaseSettings):
     # NOT configured here; it is derived from the selected model later.
     embedding_provider: str | None = None
     embedding_api_key: str | None = None
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _reject_wildcard_cors(cls, value: str) -> str:
+        if value.strip() == "*":
+            raise ValueError(
+                'cors_origins must be an explicit origin list, not "*" '
+                "(credentials are enabled)."
+            )
+        return value
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

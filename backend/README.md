@@ -27,15 +27,21 @@ DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME
 
 ## Run the API
 
+`DATABASE_URL` must point at a database holding the Phase 1 schema.
+
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-- `GET /`       → service metadata
-- `GET /health` → liveness check
-- `GET /docs`   → OpenAPI UI
+- `GET /`            → service metadata
+- `GET /health`      → liveness (no DB)
+- `GET /health/db`   → readiness (`SELECT 1`; 503 if PostgreSQL unreachable)
+- `GET /docs`        → OpenAPI UI
+- `POST /api/v1/prompts` · `GET /api/v1/prompts` · `GET /api/v1/prompts/{id}` ·
+  `GET /api/v1/prompts/{id}/versions`
 
-The API does **not** touch the database yet (Phase 1 is schema only).
+Full reference: `../docs/api.md`. Creating a prompt needs a development-only
+header `X-Dev-User-ID: <existing users.user_id>` (not authentication).
 
 ## Database: migrate + seed
 
@@ -61,8 +67,9 @@ Alembic resolves the URL from `-x db_url=...`, then `alembic.ini`
 ```
 
 - `tests/test_health.py` — runs anywhere, no database.
-- `tests/test_database.py`, `test_seed.py`, `test_zz_migration.py` — require a
-  **real PostgreSQL** throwaway database. Point them at one with:
+- `tests/test_database.py`, `test_seed.py`, `test_zz_migration.py`,
+  `test_api_prompts.py` — require a **real PostgreSQL** throwaway database.
+  Point them at one with:
 
   ```
   PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test
@@ -78,26 +85,36 @@ Alembic resolves the URL from `-x db_url=...`, then `alembic.ini`
 ```
 backend/
 ├── app/
-│   ├── main.py                FastAPI app + root route
-│   ├── core/config.py         pydantic-settings configuration
-│   ├── api/routes/health.py
+│   ├── main.py                FastAPI app: CORS, exception handlers, routers
+│   ├── core/config.py         pydantic-settings configuration (+ CORS, pool)
+│   ├── api/
+│   │   ├── router.py          aggregates the versioned API under /api/v1
+│   │   ├── deps.py            get_dev_user_id  (X-Dev-User-ID, dev-only)
+│   │   ├── errors.py          AppError types + exception handlers
+│   │   └── routes/
+│   │       ├── health.py      GET /health, GET /health/db
+│   │       └── prompts.py     POST/GET /api/v1/prompts, /{id}, /{id}/versions
+│   ├── schemas/prompt.py      PromptCreate / PromptRead / *ListResponse / VersionRead
+│   ├── services/prompt.py     business rules + the create transaction
+│   ├── repositories/prompt.py all SQLAlchemy access (never commits)
 │   └── db/
 │       ├── base.py            DeclarativeBase + constraint naming convention
 │       ├── models.py          the 9 Phase 1 tables (schema only)
-│       ├── session.py         engine / session factory helpers
+│       ├── session.py         lazy engine + get_db dependency + build_engine
 │       └── seed.py            deterministic, idempotent dev seed data
 ├── alembic/
 │   ├── env.py                 target_metadata = models; URL from settings/-x
-│   └── versions/0001_initial_schema.py
+│   └── versions/0001_initial_schema.py    (unchanged in Phase 2)
 ├── alembic.ini
 ├── tests/
-│   ├── conftest.py            PostgreSQL fixtures (skip-with-reason if absent)
-│   ├── test_health.py
-│   ├── test_database.py       15 mandated schema checks + extras
-│   ├── test_seed.py
-│   └── test_zz_migration.py   downgrade base → upgrade head round-trip
+│   ├── conftest.py            PostgreSQL fixtures + API test client (savepoint-isolated)
+│   ├── test_health.py         no DB
+│   ├── test_database.py       Phase 1: 15 mandated schema checks + extras
+│   ├── test_seed.py           Phase 1
+│   ├── test_zz_migration.py   Phase 1: downgrade base → upgrade head round-trip
+│   └── test_api_prompts.py    Phase 2: API integration tests (real PostgreSQL)
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```
 
-See `../docs/database-design.md` and `../docs/decisions.md`.
+See `../docs/api.md`, `../docs/database-design.md`, and `../docs/decisions.md`.
