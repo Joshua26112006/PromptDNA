@@ -1,7 +1,10 @@
-"""Prompt endpoints (versioned under ``/api/v1``).
+"""Prompt & version endpoints (versioned under ``/api/v1``).
 
-All endpoints require ``Authorization: Bearer <token>`` (Phase 3). Ownership /
-visibility is decided in the service layer, not here.
+All endpoints require ``Authorization: Bearer <token>``. Ownership / visibility
+is decided in the service layer, not here.
+
+Prompt content lives in **versions**; existing versions are **immutable** — there
+is deliberately no PUT/PATCH/DELETE for a version.
 """
 
 from __future__ import annotations
@@ -18,7 +21,10 @@ from app.schemas.prompt import (
     PromptCreate,
     PromptListResponse,
     PromptRead,
+    PromptUpdate,
+    VersionCreate,
     VersionListResponse,
+    VersionRead,
 )
 from app.services import prompt as service
 
@@ -26,6 +32,7 @@ router = APIRouter(prefix="/prompts", tags=["prompts"])
 
 DbDep = Annotated[Session, Depends(get_db)]
 PromptIdPath = Annotated[uuid.UUID, Path(description="Prompt UUID.")]
+VersionIdPath = Annotated[uuid.UUID, Path(description="Version UUID.")]
 
 
 @router.post(
@@ -39,7 +46,8 @@ def create_prompt(
 ) -> PromptRead:
     """Create a prompt owned by the **authenticated user** and its Version 1
     (containing ``content``) in a single transaction — if either insert fails,
-    neither is persisted. The client cannot set the owner."""
+    neither is persisted. The client cannot set the owner. Optionally pass
+    ``parent_prompt_id`` (a prompt the caller can view) to record lineage."""
 
     return service.create_prompt_with_initial_version(
         db, current_user=current_user, data=payload
@@ -91,6 +99,27 @@ def get_prompt(
     return service.get_prompt(db, prompt_id, current_user=current_user)
 
 
+@router.patch(
+    "/{prompt_id}",
+    response_model=PromptRead,
+    summary="Update prompt metadata only (owner only)",
+)
+def update_prompt(
+    prompt_id: PromptIdPath,
+    payload: PromptUpdate,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> PromptRead:
+    """Update `title` / `description` / `purpose` / `is_public` only. Never
+    touches version content, `version_number`, `created_by`, ownership, or
+    `parent_prompt_id`. Only the owner may call this (`403` for a public prompt
+    owned by someone else, `404` otherwise)."""
+
+    return service.update_prompt_metadata(
+        db, prompt_id, current_user=current_user, data=payload
+    )
+
+
 @router.get(
     "/{prompt_id}/versions",
     response_model=VersionListResponse,
@@ -101,6 +130,49 @@ def list_prompt_versions(
 ) -> VersionListResponse:
     """Read-only. Access follows the parent prompt's visibility (404 if the
     caller may not view the prompt). Versions are immutable — no
-    create/update/delete endpoint exists."""
+    create/update/delete endpoint exists for an individual version."""
 
     return service.list_versions(db, prompt_id, current_user=current_user)
+
+
+@router.post(
+    "/{prompt_id}/versions",
+    response_model=VersionRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Append a new version to a prompt (owner only)",
+)
+def create_prompt_version(
+    prompt_id: PromptIdPath,
+    payload: VersionCreate,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> VersionRead:
+    """Create the next version (`version_number` = current max + 1). Only the
+    **prompt owner** may do this — a public prompt does NOT let other users add
+    versions (`403`); a private prompt owned by someone else is `404`. Existing
+    versions are never modified. On a concurrent version-number collision the
+    insert is retried; if it still cannot be placed, `409` is returned."""
+
+    return service.create_version(
+        db, prompt_id, current_user=current_user, data=payload
+    )
+
+
+@router.get(
+    "/{prompt_id}/versions/{version_id}",
+    response_model=VersionRead,
+    summary="Get one version of a prompt",
+)
+def get_prompt_version(
+    prompt_id: PromptIdPath,
+    version_id: VersionIdPath,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> VersionRead:
+    """Returns the version only if it belongs to `prompt_id` **and** the caller
+    can view that prompt. Any mismatch (wrong prompt, missing version,
+    inaccessible private prompt) → `404`."""
+
+    return service.get_version(
+        db, prompt_id, version_id, current_user=current_user
+    )

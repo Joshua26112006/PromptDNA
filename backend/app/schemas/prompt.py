@@ -27,10 +27,13 @@ _CONTENT_MAX = 100_000
 class PromptCreate(BaseModel):
     """Body for ``POST /api/v1/prompts``.
 
-    ``prompt_id`` / ``user_id`` / ``parent_prompt_id`` / ``created_at`` /
-    ``updated_at`` are intentionally NOT accepted from the client (``extra`` is
-    forbidden). The owner is always the authenticated user from the
-    ``Authorization: Bearer`` token.
+    ``prompt_id`` / ``user_id`` / ``created_at`` / ``updated_at`` are NOT
+    accepted from the client (``extra`` is forbidden). The owner is always the
+    authenticated user from the ``Authorization: Bearer`` token.
+
+    ``parent_prompt_id`` (optional) records lineage: the new prompt is a
+    derivation / fork of an existing prompt the caller is allowed to VIEW. It
+    does not transfer ownership — the new prompt is owned by the caller.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -44,6 +47,41 @@ class PromptCreate(BaseModel):
     description: str | None = Field(default=None, max_length=_TEXT_MAX)
     purpose: str | None = Field(default=None, max_length=_TEXT_MAX)
     is_public: bool = False
+    parent_prompt_id: uuid.UUID | None = Field(
+        default=None,
+        description="Optional: UUID of a prompt the caller can view, recorded "
+        "as this prompt's lineage parent. Ownership is not transferred.",
+    )
+
+
+class PromptUpdate(BaseModel):
+    """Body for ``PATCH /api/v1/prompts/{id}`` — **metadata only**.
+
+    Every field is optional; only the fields present in the request are
+    changed. Version content, ``version_number``, ``created_by``, ownership and
+    ``parent_prompt_id`` can never be modified here.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str | None = Field(default=None, min_length=1, max_length=_TITLE_MAX)
+    description: str | None = Field(default=None, max_length=_TEXT_MAX)
+    purpose: str | None = Field(default=None, max_length=_TEXT_MAX)
+    is_public: bool | None = None
+
+
+class VersionCreate(BaseModel):
+    """Body for ``POST /api/v1/prompts/{id}/versions``.
+
+    ``version_number``, ``created_by``, ``created_at`` are NOT accepted — the
+    number is assigned by the server (current max + 1) and the creator is the
+    authenticated user.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    content: str = Field(min_length=1, max_length=_CONTENT_MAX)
+    change_summary: str | None = Field(default=None, max_length=_TEXT_MAX)
 
 
 # --------------------------------------------------------------------------- #

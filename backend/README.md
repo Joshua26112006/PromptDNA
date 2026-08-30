@@ -39,11 +39,14 @@ The API **refuses to start** if `JWT_SECRET_KEY` is unset.
 - `GET /health`      → liveness (no DB) · `GET /health/db` → readiness (`SELECT 1`)
 - `GET /docs`        → OpenAPI UI (has an **Authorize** button)
 - `POST /api/v1/auth/register` · `POST /api/v1/auth/login` · `GET /api/v1/auth/me`
-- `POST/GET /api/v1/prompts` · `GET /api/v1/prompts/{id}` ·
-  `GET /api/v1/prompts/{id}/versions`  — all require `Authorization: Bearer <token>`
+- `POST/GET /api/v1/prompts` · `GET|PATCH /api/v1/prompts/{id}`
+- `GET|POST /api/v1/prompts/{id}/versions` · `GET /api/v1/prompts/{id}/versions/{vid}`
+- all `/prompts*` routes require `Authorization: Bearer <token>`
 
-Full reference: `../docs/api.md`. The Phase 2 `X-Dev-User-ID` header has been
-**removed**; ownership comes from the authenticated user.
+Full reference: `../docs/api.md`. Ownership comes from the authenticated user
+(the Phase 2 `X-Dev-User-ID` header was removed in Phase 3). Prompt text lives
+in **versions**; existing versions are immutable — editing content means
+`POST …/versions` (owner only).
 
 ## Database: migrate + seed
 
@@ -106,10 +109,10 @@ backend/
 │   │   └── prompt.py          PromptCreate / PromptRead / *ListResponse / VersionRead
 │   ├── services/
 │   │   ├── auth.py            register + login (authentication)
-│   │   └── prompt.py          create-transaction + authorization (visibility)
+│   │   └── prompt.py          create/append/patch transactions + authorization (visibility, owner-only, lineage)
 │   ├── repositories/
 │   │   ├── user.py            get_by_id / get_by_email / add_user
-│   │   └── prompt.py          prompt/version access; list applies visibility predicate
+│   │   └── prompt.py          prompt/version access; visibility predicate; get_max_version_number; get_version_by_id; update_prompt
 │   └── db/
 │       ├── base.py            DeclarativeBase + constraint naming convention
 │       ├── models.py          the 9 Phase 1 tables (schema only — UNCHANGED)
@@ -125,9 +128,11 @@ backend/
 │   ├── test_database.py       Phase 1: 15 mandated schema checks + extras
 │   ├── test_seed.py           Phase 1
 │   ├── test_zz_migration.py   Phase 1: downgrade base → upgrade head round-trip
-│   ├── test_api_prompts.py    Phase 2 prompt behavior (now bearer-authed)
+│   ├── test_api_prompts.py    prompt list/get/validation + PATCH metadata (bearer-authed)
 │   ├── test_auth.py           Phase 3: authentication (13 cases + hash check)
-│   └── test_authz.py          Phase 3: authorization + security attack scenario
+│   ├── test_authz.py          Phase 3: authorization + security attack scenario
+│   ├── test_versions.py       Phase 4A: version append / numbering / immutability / retrieval / 409
+│   └── test_lineage.py        Phase 4A: parent_prompt_id fork rules
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```

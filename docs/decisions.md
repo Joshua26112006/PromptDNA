@@ -412,15 +412,121 @@ and CORS `allow_credentials` scoped accordingly.
 
 ---
 
+# Phase 4A decisions (core prompt & version management)
+
+## Decision 32 — Prompt / version separation is enforced, not conventional
+
+**Decision:** The `prompts` row holds identity + metadata only
+(`title`, `description`, `purpose`, `parent_prompt_id`, `is_public`). Prompt
+**text lives exclusively in `versions.content`**. There is no `content` column
+on `prompts` and none was added. `POST /prompts` writes the first version;
+`POST /prompts/{id}/versions` appends subsequent ones.
+
+**Reason:** The project thesis — "structured knowledge about prompts". History,
+diffing, and experiment reproducibility all require content to be versioned, not
+mutated in place. Keeping it physically separate makes the rule impossible to
+violate by accident.
+
+---
+
+## Decision 33 — Versions are immutable; enforced by absence of write routes
+
+**Decision:** No `PUT` / `PATCH` / `DELETE` exists for a version at
+`/prompts/{id}/versions` or `/prompts/{id}/versions/{vid}` (any such method →
+`405`). `content`, `version_number`, `created_by`, `created_at` of an existing
+version cannot be changed through the API. No prompt `DELETE` either (deferred).
+`PATCH /prompts/{id}` is metadata-only and physically cannot reach version rows.
+
+**Reason:** Immutability is a core project rule (restated from Decisions 5 & 13
+at the API surface). The cheapest, least-bypassable enforcement is to simply not
+build the routes and to keep the metadata-update path in a different service
+function that never loads a `Version`.
+
+---
+
+## Decision 34 — Version numbering: `MAX(version_number) + 1`, DB is the guard
+
+**Decision:** `create_version` reads `SELECT MAX(version_number) WHERE prompt_id
+= …` **fresh from PostgreSQL on every attempt** (never cached in app memory) and
+inserts `max + 1`. The Phase 1 `UNIQUE (prompt_id, version_number)` +
+`CHECK (version_number > 0)` constraints are the final protection.
+
+**Reason:** Simple, correct for the common (sequential) case, and leans on the
+constraint that already exists rather than inventing a counter table.
+
+---
+
+## Decision 35 — Version-number races: bounded retry, then `409`
+
+**Decision:** On the `IntegrityError` from two writers computing the same
+`N+1`, the service `rollback()`s and **retries up to 5 times**, recomputing the
+number each time. If it still cannot place a number it returns **`409`**
+("Could not allocate a version number due to concurrent writes. Please retry.")
+— never a `500`, never a silent overwrite.
+
+**Reason:** The spec asks for graceful handling without over-engineering
+locking. A short retry absorbs realistic contention; the `409` is an honest
+"try again" for pathological contention. Documented as best-effort — a
+serialized allocation (`SELECT … FOR UPDATE` on the prompt, or a Postgres
+advisory lock) is noted as future hardening. No claim of unlimited lock-free
+concurrent version creation.
+
+---
+
+## Decision 36 — `Version.created_by` always comes from the authenticated user
+
+**Decision:** `VersionCreate` accepts only `content` + `change_summary`
+(`extra="forbid"`). `version_number`, `created_by`, `created_at` in the body are
+`422`. `created_by` is set to `current_user.user_id` server-side. Only the
+**prompt owner** may create versions — a public prompt does not grant other
+users write access (`403`); a private prompt owned by another user answers
+`404`.
+
+**Reason:** Keeps ownership semantics simple and un-spoofable for this phase.
+"Contributors" / shared-write is explicitly out of scope.
+
+---
+
+## Decision 37 — Lineage: optional `parent_prompt_id` on create; fork-from-viewable
+
+**Decision:** `POST /prompts` optionally accepts `parent_prompt_id`. Rules: the
+parent must exist **and** be viewable by the caller (own or public) — otherwise
+`404` with a message that does not distinguish "missing" from "not accessible".
+Malformed UUID → `422`. The new prompt is **owned by the caller**; ownership is
+never transferred and the parent is not modified. Self-parenting is
+structurally impossible (the client can't know the new id) and the service
+guards against it anyway. `PATCH` cannot change `parent_prompt_id`. No
+recursive/graph lineage APIs — Neo4j remains a later phase.
+
+**Reason:** `prompts.parent_prompt_id` already exists (Phase 1, `ON DELETE SET
+NULL`) and the create endpoint slots this in cleanly with one lookup. It gives
+real "User B forks User A's public prompt" semantics with no schema change and
+no graph infrastructure.
+
+---
+
+## Decision 38 — `PATCH /prompts/{id}` for metadata (implemented, not deferred)
+
+**Decision:** Implemented, owner-only, partial (`model_dump(exclude_unset=True)`).
+Updates `title` / `description` / `purpose` / `is_public` only. Empty body →
+`200` no-op. `updated_at` is bumped by the ORM `onupdate`.
+
+**Reason:** Metadata edits (rename, toggle public) are genuinely separate from
+immutable content and the layered architecture absorbs them in ~15 lines with no
+risk to the version rules. The spec lists PATCH as an approximately-expected
+endpoint and permits it when cleanly separated — it is.
+
+---
+
 ## Non-decisions (still deferred)
 
 - pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.
-- Neo4j integration and PostgreSQL→graph sync mechanism — later phase.
+- Neo4j integration and PostgreSQL→graph sync mechanism; recursive lineage / ancestor-descendant APIs — later phase.
 - Refresh tokens, server-side token revocation / blacklist, `/auth/logout` — later phase.
-- Roles / permissions / RBAC, SSO — later phase.
+- Roles / permissions / RBAC, SSO, shared-write / prompt collaborators — later phase.
 - Rate limiting & brute-force protection on `/auth/*` — later phase (security hardening).
 - HttpOnly-cookie token storage + CSRF — production hardening.
-- Prompt update/delete endpoints, version-creation workflow + its concurrency handling — later phase.
+- Prompt `DELETE` / lifecycle management; serialized (`FOR UPDATE` / advisory-lock) version-number allocation — later phase.
 - Full-text or semantic search; cursor pagination — later phases.
 - Denormalized read models / materialized views — only if a real workload needs them.
 - Production deployment + production CORS configuration — later phase.

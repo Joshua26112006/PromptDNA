@@ -138,13 +138,22 @@ Minimal token claims (`sub`, `iat`, `exp`); `JWT_SECRET_KEY` required (no
 fallback). The Phase 2 `X-Dev-User-ID` header is **removed** — prompt ownership
 comes from the token. Per-user authorization in the service layer: a prompt is
 visible to its owner or if `is_public`; other users' private prompts return
-`404` (no existence oracle); query params can't widen visibility. Prompt +
-Version 1 transaction preserved. Minimal Next.js `/login` + `/register` flow
-(token in `localStorage` — XSS trade-off documented). See
-[`docs/api.md`](docs/api.md). **No schema change, no new migration.**
+`404`. Minimal Next.js `/login` + `/register` flow (token in `localStorage` —
+XSS trade-off documented).
+
+### Phase 4A — core prompt & version management ✅
+`POST /api/v1/prompts/{id}/versions` (append an immutable version; owner-only;
+`version_number` = max+1; bounded retry then `409` on the unique-constraint
+race), `GET /api/v1/prompts/{id}/versions/{vid}` (belongs-to + visibility
+checked; `404` otherwise), `PATCH /api/v1/prompts/{id}` (metadata only, owner
+only). `parent_prompt_id` optional on create — fork/derive from any prompt you
+can view; the fork is owned by the creator, the parent is untouched. Versions
+have **no** PUT/PATCH/DELETE. Search stays lexical. See
+[`docs/api.md`](docs/api.md). **No schema change, no new migration** — Neo4j /
+pgvector / embeddings / semantic search untouched.
 
 ### Not started (by design)
-Refresh tokens / token revocation / logout endpoint, roles / RBAC / SSO, rate
-limiting, prompt update/delete, version creation, pgvector / embeddings /
-semantic search, Neo4j integration, dashboard, analytics UI, production
-deployment.
+Prompt deletion, version editing, recursive/graph lineage APIs, refresh tokens /
+token revocation, roles / RBAC / SSO, rate limiting, pgvector / embeddings /
+semantic search, Neo4j integration, tags/collections UI, dashboard, analytics
+UI, production deployment.

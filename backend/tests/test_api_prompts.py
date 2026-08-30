@@ -218,3 +218,75 @@ def test_cors_preflight_allows_configured_origin(client):
     )
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+# --- PATCH prompt metadata (Phase 4A) ---------------------------------- #
+def test_patch_updates_metadata_only(client, user_a):
+    body = _create(client, user_a, title="Before", is_public=False).json()
+    pid = body["prompt_id"]
+    v1_id = body["versions"][0]["version_id"]
+
+    r = client.patch(
+        f"{BASE}/{pid}",
+        json={"title": "After", "purpose": "new purpose", "is_public": True},
+        headers=user_a.headers,
+    )
+    assert r.status_code == 200
+    patched = r.json()
+    assert patched["title"] == "After"
+    assert patched["purpose"] == "new purpose"
+    assert patched["is_public"] is True
+    # versions untouched
+    assert len(patched["versions"]) == 1
+    assert patched["versions"][0]["version_id"] == v1_id
+    assert patched["versions"][0]["content"] == "You are a helpful assistant."
+
+
+def test_patch_is_partial(client, user_a):
+    pid = _create(client, user_a, title="Keep me", is_public=True).json()["prompt_id"]
+    r = client.patch(f"{BASE}/{pid}", json={"is_public": False}, headers=user_a.headers)
+    assert r.status_code == 200
+    assert r.json()["title"] == "Keep me"        # unchanged
+    assert r.json()["is_public"] is False
+
+
+def test_patch_rejects_content_and_ownership_fields(client, user_a, user_b):
+    pid = _create(client, user_a).json()["prompt_id"]
+    for bad in ({"content": "x"}, {"user_id": user_b.user_id},
+                {"version_number": 5}, {"parent_prompt_id": str(uuid.uuid4())},
+                {"created_by": user_b.user_id}):
+        r = client.patch(f"{BASE}/{pid}", json=bad, headers=user_a.headers)
+        assert r.status_code == 422, bad
+
+
+def test_patch_by_non_owner_public_is_403_private_is_404(client, user_a, user_b):
+    pub = _create(client, user_a, is_public=True).json()["prompt_id"]
+    priv = _create(client, user_a, is_public=False).json()["prompt_id"]
+    assert client.patch(f"{BASE}/{pub}", json={"title": "x"},
+                        headers=user_b.headers).status_code == 403
+    assert client.patch(f"{BASE}/{priv}", json={"title": "x"},
+                        headers=user_b.headers).status_code == 404
+
+
+def test_patch_requires_auth(client, user_a):
+    pid = _create(client, user_a).json()["prompt_id"]
+    assert client.patch(f"{BASE}/{pid}", json={"title": "x"}).status_code == 401
+
+
+def test_patch_missing_prompt_is_404(client, user_a):
+    assert client.patch(
+        f"{BASE}/{uuid.uuid4()}", json={"title": "x"}, headers=user_a.headers
+    ).status_code == 404
+
+
+def test_patch_empty_body_is_noop_200(client, user_a):
+    pid = _create(client, user_a, title="Same").json()["prompt_id"]
+    r = client.patch(f"{BASE}/{pid}", json={}, headers=user_a.headers)
+    assert r.status_code == 200
+    assert r.json()["title"] == "Same"
+
+
+def test_patch_invalid_title_is_422(client, user_a):
+    pid = _create(client, user_a).json()["prompt_id"]
+    assert client.patch(f"{BASE}/{pid}", json={"title": ""},
+                        headers=user_a.headers).status_code == 422

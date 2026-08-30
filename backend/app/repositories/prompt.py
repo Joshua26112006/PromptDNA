@@ -37,6 +37,7 @@ def add_prompt(
     description: str | None,
     purpose: str | None,
     is_public: bool,
+    parent_prompt_id: uuid.UUID | None = None,
 ) -> Prompt:
     prompt = Prompt(
         user_id=user_id,
@@ -44,6 +45,7 @@ def add_prompt(
         description=description,
         purpose=purpose,
         is_public=is_public,
+        parent_prompt_id=parent_prompt_id,
     )
     db.add(prompt)
     db.flush()  # assign prompt_id without committing
@@ -61,6 +63,15 @@ def get_prompt_by_id(db: Session, prompt_id: uuid.UUID) -> Prompt | None:
         )
     )
     return db.scalars(stmt).one_or_none()
+
+
+def update_prompt(db: Session, prompt: Prompt, **fields: object) -> Prompt:
+    """Apply metadata changes to an already-loaded prompt (no commit)."""
+
+    for key, value in fields.items():
+        setattr(prompt, key, value)
+    db.flush()
+    return prompt
 
 
 def list_prompts(
@@ -140,3 +151,22 @@ def list_versions_for_prompt(
         .order_by(Version.version_number.asc())
     )
     return db.scalars(stmt).all()
+
+
+def get_version_by_id(db: Session, version_id: uuid.UUID) -> Version | None:
+    return db.get(Version, version_id)
+
+
+def get_max_version_number(db: Session, prompt_id: uuid.UUID) -> int | None:
+    """Highest ``version_number`` for the prompt, or ``None`` if it has none.
+
+    Read fresh from the database on every call — the caller must not cache it,
+    because a concurrent writer may have advanced it. The
+    ``UNIQUE (prompt_id, version_number)`` constraint is the final guard.
+    """
+
+    return db.scalar(
+        select(func.max(Version.version_number)).where(
+            Version.prompt_id == prompt_id
+        )
+    )

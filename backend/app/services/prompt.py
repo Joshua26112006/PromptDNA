@@ -1,19 +1,27 @@
-"""Prompt business logic + authorization.
+"""Prompt & version business logic + authorization.
 
-Authorization rules (Phase 3) — all enforced here, never in routes:
+Prompt vs. version
+------------------
+A ``prompts`` row is the logical container (title/description/purpose/lineage/
+visibility). The prompt text lives in ``versions.content``. Versions are
+**immutable**: "editing a prompt's content" means inserting a new version, never
+updating an existing one. There is no update/delete path for versions.
 
-* **Create**: any authenticated user; the caller becomes ``prompts.user_id``.
-* **Read / list / versions**: a prompt is *visible* to a user iff the user
-  owns it **or** ``is_public is True``.
-* An inaccessible private prompt is reported as **404** (same message as a
-  genuinely missing prompt) so a caller cannot probe for its existence.
+Authorization (all enforced here, never in routes)
+--------------------------------------------------
+* ``_can_view``   : owner OR ``is_public``.
+* Read / list / version-history / single-version: not viewable → **404**
+  (same body as a missing prompt, so existence cannot be probed).
+* Create version / PATCH metadata: **owner only**. A non-owner who *can* view a
+  public prompt gets **403** (existence is already public); otherwise **404**.
 
-Transaction boundary — :func:`create_prompt_with_initial_version`:
-
-    BEGIN
-        INSERT prompts
-        INSERT versions (version_number = 1)
-    COMMIT            -- both, or neither
+Transactions (service owns the boundary; repositories never commit)
+------------------------------------------------------------------
+* create prompt        : INSERT prompt + INSERT version 1  → one commit
+* create version       : SELECT max(version_number) → INSERT version → commit,
+                         with a bounded retry on the UNIQUE(prompt_id,
+                         version_number) race, then 409.
+* PATCH metadata        : UPDATE prompts (metadata columns only) → commit
 """
 
 from __future__ import annotations
@@ -21,9 +29,10 @@ from __future__ import annotations
 import logging
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.errors import NotFoundError
+from app.api.errors import ConflictError, ForbiddenError, NotFoundError
 from app.db.models import Prompt, User
 from app.repositories import prompt as repo
 from app.schemas.prompt import (
@@ -32,6 +41,8 @@ from app.schemas.prompt import (
     PromptListItem,
     PromptListResponse,
     PromptRead,
+    PromptUpdate,
+    VersionCreate,
     VersionListResponse,
     VersionRead,
 )
@@ -40,6 +51,7 @@ logger = logging.getLogger("promptdna")
 
 INITIAL_VERSION_NUMBER = 1
 INITIAL_CHANGE_SUMMARY = "Initial version."
+VERSION_NUMBER_MAX_RETRIES = 5
 
 
 # --------------------------------------------------------------------------- #
@@ -49,21 +61,28 @@ def _can_view(prompt: Prompt, user: User) -> bool:
     return prompt.user_id == user.user_id or prompt.is_public
 
 
-def _load_viewable_prompt(
-    db: Session, prompt_id: uuid.UUID, user: User
-) -> Prompt:
-    """Return the prompt if the user may view it, else raise 404.
+def _load_viewable_prompt(db: Session, prompt_id: uuid.UUID, user: User) -> Prompt:
+    prompt = repo.get_prompt_by_id(db, prompt_id)
+    if prompt is None or not _can_view(prompt, user):
+        raise NotFoundError("Prompt not found.")
+    return prompt
 
-    Missing prompt and access-denied private prompt return the SAME error so
-    existence cannot be probed.
+
+def _load_owned_prompt(db: Session, prompt_id: uuid.UUID, user: User) -> Prompt:
+    """Return the prompt only if ``user`` owns it.
+
+    Public prompt owned by someone else → 403 (its existence is already public).
+    Private prompt owned by someone else, or missing → 404 (no existence leak).
     """
 
     prompt = repo.get_prompt_by_id(db, prompt_id)
-    if prompt is None or not _can_view(prompt, user):
-        # Constant message: a denied private prompt is indistinguishable from a
-        # missing one, so callers cannot probe for existence.
+    if prompt is None:
         raise NotFoundError("Prompt not found.")
-    return prompt
+    if prompt.user_id == user.user_id:
+        return prompt
+    if prompt.is_public:
+        raise ForbiddenError("Only the prompt owner can perform this action.")
+    raise NotFoundError("Prompt not found.")
 
 
 # --------------------------------------------------------------------------- #
@@ -95,7 +114,17 @@ def _to_prompt_read(prompt: Prompt) -> PromptRead:
 def create_prompt_with_initial_version(
     db: Session, *, current_user: User, data: PromptCreate
 ) -> PromptRead:
-    """Create a prompt owned by ``current_user`` and its Version 1, atomically."""
+    """Create a prompt owned by ``current_user`` and its Version 1, atomically.
+
+    If ``data.parent_prompt_id`` is set it must reference a prompt the caller
+    can VIEW (lineage / fork). Ownership is not transferred — the new prompt is
+    owned by ``current_user``.
+    """
+
+    if data.parent_prompt_id is not None:
+        parent = repo.get_prompt_by_id(db, data.parent_prompt_id)
+        if parent is None or not _can_view(parent, current_user):
+            raise NotFoundError("Parent prompt not found or not accessible.")
 
     try:
         prompt = repo.add_prompt(
@@ -105,7 +134,12 @@ def create_prompt_with_initial_version(
             description=data.description,
             purpose=data.purpose,
             is_public=data.is_public,
+            parent_prompt_id=data.parent_prompt_id,
         )
+        # Defensive: a prompt can never be its own lineage parent. Unreachable
+        # via the API (the client cannot know the new prompt_id) but cheap.
+        if prompt.prompt_id == data.parent_prompt_id:
+            raise ForbiddenError("A prompt cannot be its own parent.")
         repo.add_version(
             db,
             prompt_id=prompt.prompt_id,
@@ -123,6 +157,87 @@ def create_prompt_with_initial_version(
     created = repo.get_prompt_by_id(db, prompt.prompt_id)
     assert created is not None  # just committed
     return _to_prompt_read(created)
+
+
+def create_version(
+    db: Session,
+    prompt_id: uuid.UUID,
+    *,
+    current_user: User,
+    data: VersionCreate,
+) -> VersionRead:
+    """Append a new immutable version to a prompt the caller **owns**.
+
+    ``version_number`` = current max + 1, read fresh from the database. On the
+    ``UNIQUE(prompt_id, version_number)`` race the insert is retried a bounded
+    number of times with a recomputed number; if it still cannot be placed a
+    ``409`` is returned. Existing versions are never touched.
+    """
+
+    _load_owned_prompt(db, prompt_id, current_user)  # 403 / 404 as appropriate
+
+    for attempt in range(1, VERSION_NUMBER_MAX_RETRIES + 1):
+        next_number = (repo.get_max_version_number(db, prompt_id) or 0) + 1
+        try:
+            version = repo.add_version(
+                db,
+                prompt_id=prompt_id,
+                version_number=next_number,
+                content=data.content,
+                created_by=current_user.user_id,
+                change_summary=data.change_summary,
+            )
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if attempt == VERSION_NUMBER_MAX_RETRIES:
+                logger.warning(
+                    "version-number contention on prompt %s: gave up after %d tries",
+                    prompt_id, attempt,
+                )
+                raise ConflictError(
+                    "Could not allocate a version number due to concurrent "
+                    "writes. Please retry."
+                ) from None
+            continue
+        except Exception:
+            db.rollback()
+            logger.exception("create_version failed; rolled back")
+            raise
+        db.refresh(version)
+        return VersionRead.model_validate(version)
+
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def update_prompt_metadata(
+    db: Session,
+    prompt_id: uuid.UUID,
+    *,
+    current_user: User,
+    data: PromptUpdate,
+) -> PromptRead:
+    """Update prompt **metadata only** (title/description/purpose/is_public).
+
+    Owner only. Never touches versions, ``version_number``, ``created_by``,
+    ownership, or ``parent_prompt_id``.
+    """
+
+    prompt = _load_owned_prompt(db, prompt_id, current_user)
+    changes = data.model_dump(exclude_unset=True)
+
+    if changes:
+        try:
+            repo.update_prompt(db, prompt, **changes)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("update_prompt_metadata failed; rolled back")
+            raise
+
+    refreshed = repo.get_prompt_by_id(db, prompt_id)
+    assert refreshed is not None
+    return _to_prompt_read(refreshed)
 
 
 # --------------------------------------------------------------------------- #
@@ -175,3 +290,21 @@ def list_versions(
     versions = repo.list_versions_for_prompt(db, prompt_id)
     items = [VersionRead.model_validate(v) for v in versions]
     return VersionListResponse(items=items, total=len(items))
+
+
+def get_version(
+    db: Session,
+    prompt_id: uuid.UUID,
+    version_id: uuid.UUID,
+    *,
+    current_user: User,
+) -> VersionRead:
+    """Return one version, verifying it belongs to ``prompt_id`` and the caller
+    can view that prompt. Any mismatch → 404 (no existence leak)."""
+
+    _load_viewable_prompt(db, prompt_id, current_user)  # 404 if not viewable
+
+    version = repo.get_version_by_id(db, version_id)
+    if version is None or version.prompt_id != prompt_id:
+        raise NotFoundError("Version not found.")
+    return VersionRead.model_validate(version)

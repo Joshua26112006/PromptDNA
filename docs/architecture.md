@@ -172,7 +172,64 @@ Service layer  →  Repository  →  SQLAlchemy 2.x  →  PostgreSQL
 
 Explicitly **out of scope** for Phase 3 (later phases): refresh tokens,
 server-side revocation, RBAC / roles, SSO, rate limiting, Neo4j,
-pgvector/embeddings/semantic search, AI model calls, prompt update/delete,
-version creation, dashboard, analytics.
+pgvector/embeddings/semantic search, AI model calls, dashboard, analytics.
+
+## Phase 4A scope (done) — core prompt & version management
+
+### Prompt / version model
+
+```
+Prompt  (prompts row: identity + metadata only — NO prompt text)
+  user_id ............ owner            (set from the authenticated user)
+  parent_prompt_id ... lineage parent  (optional; a prompt the creator can view)
+  title / description / purpose / is_public
+  │
+  ├── Version 1   content = "Summarize this document."          created_by = <user>
+  ├── Version 2   content = "Summarize in 5 bullet points."      created_by = <user>
+  ├── Version 3   content = "5 bullet points + limitations."     created_by = <user>
+  └── ...         (immutable; a new version is appended, never edited)
+```
+
+- **`Prompt.user_id` → ownership.** Only the owner may add versions or PATCH
+  metadata. Visibility to others is `is_public`.
+- **`Version.created_by` → who authored that version.** Taken from the
+  authenticated user; the client cannot set it. (Today that is always the owner,
+  since only the owner can create versions.)
+- **Prompt content is never on the `prompts` row** — it lives in
+  `versions.content`. Editing content = appending a new version.
+
+### Endpoints added this phase
+
+```
+POST   /api/v1/prompts/{id}/versions          append version (owner only)
+GET    /api/v1/prompts/{id}/versions/{vid}     one version (belongs-to + visibility checked)
+PATCH  /api/v1/prompts/{id}                    metadata only (owner only)
+```
+
+plus `parent_prompt_id` accepted (optionally) on `POST /api/v1/prompts`.
+
+### Behavior
+
+- **Version numbering**: `MAX(version_number) + 1`, read fresh from PostgreSQL
+  per attempt. `UNIQUE (prompt_id, version_number)` is the final guard; the
+  service retries on the race (bounded), then returns `409`.
+- **Transactions** (service-owned): create prompt = INSERT prompt + INSERT
+  version 1, one commit; create version = SELECT max → INSERT version, one
+  commit; PATCH = UPDATE prompts (metadata columns), one commit. Rollback on any
+  failure.
+- **Immutability**: no `PUT`/`PATCH`/`DELETE` for a version; `content` /
+  `version_number` / `created_by` / `created_at` of an existing version are
+  unreachable for mutation. No prompt `DELETE` (deferred).
+- **Lineage**: `prompts.parent_prompt_id` only — a fork/derivation link. The
+  child is owned by its creator; the parent is untouched. No recursive lineage
+  APIs, no graph store.
+- **Search** stays lexical (`ILIKE` on `title`), applied after the visibility
+  predicate.
+- **No schema change, no migration**; `alembic check` clean. Neo4j, pgvector,
+  embeddings, and semantic search remain untouched.
+
+Explicitly **out of scope** for Phase 4A: prompt deletion, version editing,
+recursive lineage / graph APIs, tags/collections management, dashboard, and all
+Phase 4B+ features.
 
 Full endpoint reference: `api.md`.
