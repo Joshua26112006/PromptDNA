@@ -15,7 +15,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+
+# A JWT secret must exist before `app.*` is imported (the app validates it at
+# startup). Tests use a fixed, obviously-non-production value (>= 32 bytes).
+os.environ.setdefault(
+    "JWT_SECRET_KEY", "test-only-jwt-secret-not-for-production-use-0123456789"
+)
 
 import pytest
 from sqlalchemy import Connection, create_engine, text
@@ -178,19 +185,57 @@ def client(_session_factory: sessionmaker[Session]):
     app.dependency_overrides.pop(get_db, None)
 
 
-@pytest.fixture
-def dev_user(db_session: Session):
-    """An existing user whose UUID can be passed as ``X-Dev-User-ID``."""
+# --------------------------------------------------------------------------- #
+# Authentication helpers for API tests                                        #
+# --------------------------------------------------------------------------- #
+DEFAULT_PASSWORD = "password123"
+
+
+@dataclass
+class AuthUser:
+    user_id: str
+    name: str
+    email: str
+    password: str
+    token: str
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token}"}
+
+
+def register_and_login(client, *, name="Test User", email=None,
+                       password=DEFAULT_PASSWORD) -> AuthUser:
+    """Register a fresh user through the API and return them with a live token."""
 
     import uuid
 
-    from app.db.models import User
-
-    user = User(
-        name="Dev User",
-        email=f"dev-{uuid.uuid4().hex[:10]}@promptdna.test",
-        password_hash="placeholder-not-a-real-hash",
+    email = email or f"user-{uuid.uuid4().hex[:12]}@example.com"
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={"name": name, "email": email, "password": password},
     )
-    db_session.add(user)
-    db_session.commit()
-    return user
+    assert reg.status_code == 201, reg.text
+    body = reg.json()
+    tok = client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert tok.status_code == 200, tok.text
+    return AuthUser(
+        user_id=body["user_id"],
+        name=body["name"],
+        email=body["email"],
+        password=password,
+        token=tok.json()["access_token"],
+    )
+
+
+@pytest.fixture
+def user_a(client) -> AuthUser:
+    return register_and_login(client, name="User A")
+
+
+@pytest.fixture
+def user_b(client) -> AuthUser:
+    return register_and_login(client, name="User B")

@@ -1,7 +1,7 @@
 """Prompt endpoints (versioned under ``/api/v1``).
 
-Routers are thin: parse/validate input, call a service, return a response
-schema. No database access here.
+All endpoints require ``Authorization: Bearer <token>`` (Phase 3). Ownership /
+visibility is decided in the service layer, not here.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_dev_user_id
+from app.api.deps import CurrentUser
 from app.db.session import get_db
 from app.schemas.prompt import (
     PromptCreate,
@@ -35,29 +35,25 @@ PromptIdPath = Annotated[uuid.UUID, Path(description="Prompt UUID.")]
     summary="Create a prompt (and its Version 1) atomically",
 )
 def create_prompt(
-    payload: PromptCreate,
-    db: DbDep,
-    dev_user_id: Annotated[uuid.UUID, Depends(get_dev_user_id)],
+    payload: PromptCreate, db: DbDep, current_user: CurrentUser
 ) -> PromptRead:
-    """Create a prompt owned by the `X-Dev-User-ID` user.
-
-    The prompt row and its first `versions` row (``version_number = 1``,
-    containing ``content``) are written in a single transaction: if either
-    insert fails, neither is persisted.
-    """
+    """Create a prompt owned by the **authenticated user** and its Version 1
+    (containing ``content``) in a single transaction — if either insert fails,
+    neither is persisted. The client cannot set the owner."""
 
     return service.create_prompt_with_initial_version(
-        db, dev_user_id=dev_user_id, data=payload
+        db, current_user=current_user, data=payload
     )
 
 
 @router.get(
     "",
     response_model=PromptListResponse,
-    summary="List prompts (paginated)",
+    summary="List prompts visible to the authenticated user (paginated)",
 )
 def list_prompts(
     db: DbDep,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[
@@ -70,29 +66,41 @@ def list_prompts(
     ] = None,
     is_public: Annotated[bool | None, Query()] = None,
 ) -> PromptListResponse:
+    """Returns the caller's own prompts plus public prompts. Query parameters
+    can only narrow this set — they cannot expose other users' private
+    prompts."""
+
     return service.list_prompts(
-        db, limit=limit, offset=offset, search=search, is_public=is_public
+        db,
+        current_user=current_user,
+        limit=limit,
+        offset=offset,
+        search=search,
+        is_public=is_public,
     )
 
 
 @router.get(
     "/{prompt_id}",
     response_model=PromptRead,
-    summary="Get one prompt with its owner and all versions",
+    summary="Get one prompt (owner or public only; 404 otherwise)",
 )
-def get_prompt(prompt_id: PromptIdPath, db: DbDep) -> PromptRead:
-    return service.get_prompt(db, prompt_id)
+def get_prompt(
+    prompt_id: PromptIdPath, db: DbDep, current_user: CurrentUser
+) -> PromptRead:
+    return service.get_prompt(db, prompt_id, current_user=current_user)
 
 
 @router.get(
     "/{prompt_id}/versions",
     response_model=VersionListResponse,
-    summary="List a prompt's versions (immutable, ordered by version_number ASC)",
+    summary="List a prompt's versions (immutable, version_number ASC)",
 )
 def list_prompt_versions(
-    prompt_id: PromptIdPath, db: DbDep
+    prompt_id: PromptIdPath, db: DbDep, current_user: CurrentUser
 ) -> VersionListResponse:
-    """Read-only. Versions are immutable — there is no create/update/delete
-    endpoint for versions in this phase (see docs/api.md)."""
+    """Read-only. Access follows the parent prompt's visibility (404 if the
+    caller may not view the prompt). Versions are immutable — no
+    create/update/delete endpoint exists."""
 
-    return service.list_versions(db, prompt_id)
+    return service.list_versions(db, prompt_id, current_user=current_user)

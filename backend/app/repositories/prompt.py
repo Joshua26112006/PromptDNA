@@ -1,8 +1,12 @@
-"""Data access for prompts, versions, and the user-existence check.
+"""Data access for prompts and versions.
 
 Functions take the :class:`~sqlalchemy.orm.Session` as their first argument,
 mutate it (``add`` / ``flush``) or query it, and return ORM objects or rows.
 They never ``commit`` or ``rollback``.
+
+Authorization note: :func:`list_prompts` applies the visibility predicate
+(``owner OR public``) itself and combines it with user filters using ``AND``,
+so no query parameter can widen what a viewer sees.
 """
 
 from __future__ import annotations
@@ -10,23 +14,16 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import Row, func, select
+from sqlalchemy import Row, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Prompt, User, Version
+from app.db.models import Prompt, Version
 
 
 def _escape_like(term: str) -> str:
     """Escape LIKE/ILIKE wildcards so a search term is treated literally."""
 
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-# --------------------------------------------------------------------------- #
-# Users                                                                      #
-# --------------------------------------------------------------------------- #
-def get_user_by_id(db: Session, user_id: uuid.UUID) -> User | None:
-    return db.get(User, user_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -66,29 +63,30 @@ def get_prompt_by_id(db: Session, prompt_id: uuid.UUID) -> Prompt | None:
     return db.scalars(stmt).one_or_none()
 
 
-def prompt_exists(db: Session, prompt_id: uuid.UUID) -> bool:
-    stmt = select(Prompt.prompt_id).where(Prompt.prompt_id == prompt_id).limit(1)
-    return db.scalar(stmt) is not None
-
-
 def list_prompts(
     db: Session,
     *,
+    viewer_id: uuid.UUID,
     limit: int,
     offset: int,
     search: str | None = None,
     is_public: bool | None = None,
 ) -> tuple[Sequence[Row], int]:
-    """Return ``(rows, total)``.
+    """Return ``(rows, total)`` for prompts **visible to ``viewer_id``**.
 
-    Each row exposes ``.Prompt`` and ``.latest_version_number`` (may be ``None``
-    for a prompt that somehow has no version). ``total`` is the count under the
-    same filters, for pagination metadata.
+    Visible = owned by the viewer OR ``is_public = true``. Optional ``search``
+    (title substring) and ``is_public`` filters are ANDed on top and can only
+    narrow the result. Each row exposes ``.Prompt`` and
+    ``.latest_version_number``.
     """
 
-    filters = []
+    visibility = or_(Prompt.user_id == viewer_id, Prompt.is_public.is_(True))
+
+    filters = [visibility]
     if search:
-        filters.append(Prompt.title.ilike(f"%{_escape_like(search)}%", escape="\\"))
+        filters.append(
+            Prompt.title.ilike(f"%{_escape_like(search)}%", escape="\\")
+        )
     if is_public is not None:
         filters.append(Prompt.is_public.is_(is_public))
 
@@ -96,15 +94,13 @@ def list_prompts(
     stmt = (
         select(Prompt, latest)
         .outerjoin(Version, Version.prompt_id == Prompt.prompt_id)
+        .where(*filters)
         .group_by(Prompt.prompt_id)
         .order_by(Prompt.created_at.desc(), Prompt.prompt_id)
         .limit(limit)
         .offset(offset)
     )
-    count_stmt = select(func.count()).select_from(Prompt)
-    if filters:
-        stmt = stmt.where(*filters)
-        count_stmt = count_stmt.where(*filters)
+    count_stmt = select(func.count()).select_from(Prompt).where(*filters)
 
     rows = db.execute(stmt).all()
     total = db.scalar(count_stmt) or 0

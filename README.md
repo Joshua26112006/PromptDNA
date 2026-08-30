@@ -66,6 +66,8 @@ PromptDNA/
 
 ```bash
 cp .env.example .env      # fill in as needed; never commit .env
+# REQUIRED for the API to start (Phase 3):
+#   JWT_SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(64))")
 ```
 
 ### 2. Backend (Python 3.11+)
@@ -75,12 +77,13 @@ cd backend
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # Windows
 # ./.venv/bin/pip install -r requirements-dev.txt                   # macOS/Linux
-# DATABASE_URL must point at the Phase 1 schema (see .env.example)
+# DATABASE_URL -> Phase 1 schema; JWT_SECRET_KEY -> a strong random value
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
 - Liveness: <http://localhost:8000/health> · DB readiness: <http://localhost:8000/health/db>
-- API (v1): <http://localhost:8000/api/v1/prompts> · docs: <http://localhost:8000/docs>
+- Auth: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`
+- API (v1): <http://localhost:8000/api/v1/prompts> (send `Authorization: Bearer <token>`) · docs: <http://localhost:8000/docs>
 - Tests (need a real PostgreSQL test DB):
   `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
 - Full endpoint reference: [`docs/api.md`](docs/api.md)
@@ -127,10 +130,21 @@ over the **unchanged** Phase 1 schema. Per-request DB session dependency;
 prompt writes the prompt **and its Version 1** in one transaction (rollback
 tested). Versions are read-only/immutable. Pagination + lexical `title` search.
 Uniform error bodies (no SQL/credentials/traces). CORS allow-list.
-`X-Dev-User-ID` is a **development-only** owner mechanism, **not** auth. See
-[`docs/api.md`](docs/api.md). No schema change, no new migration.
+
+### Phase 3 — authentication, authorization & ownership ✅
+JWT bearer auth: `POST /api/v1/auth/register` (Argon2 password hashing),
+`POST /api/v1/auth/login` (OAuth2 form → access token), `GET /api/v1/auth/me`.
+Minimal token claims (`sub`, `iat`, `exp`); `JWT_SECRET_KEY` required (no
+fallback). The Phase 2 `X-Dev-User-ID` header is **removed** — prompt ownership
+comes from the token. Per-user authorization in the service layer: a prompt is
+visible to its owner or if `is_public`; other users' private prompts return
+`404` (no existence oracle); query params can't widen visibility. Prompt +
+Version 1 transaction preserved. Minimal Next.js `/login` + `/register` flow
+(token in `localStorage` — XSS trade-off documented). See
+[`docs/api.md`](docs/api.md). **No schema change, no new migration.**
 
 ### Not started (by design)
-Authentication / JWT / OAuth (replacing `X-Dev-User-ID`), prompt update/delete,
-version creation, pgvector / embeddings / semantic search, Neo4j integration,
-dashboard, analytics UI, production deployment.
+Refresh tokens / token revocation / logout endpoint, roles / RBAC / SSO, rate
+limiting, prompt update/delete, version creation, pgvector / embeddings /
+semantic search, Neo4j integration, dashboard, analytics UI, production
+deployment.

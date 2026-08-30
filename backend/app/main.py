@@ -1,14 +1,16 @@
 """FastAPI application entry point.
 
-Phase 2: database-backed API with a layered architecture
-(router -> schema -> service -> repository -> SQLAlchemy -> PostgreSQL).
-No authentication yet — see `app/api/deps.py` and `docs/api.md` for the
-development-only `X-Dev-User-ID` mechanism.
+Phase 3: JWT authentication + per-user authorization on top of the Phase 2
+layered architecture (router -> schema -> current-user -> authorization ->
+service -> repository -> SQLAlchemy -> PostgreSQL). The Phase 2
+``X-Dev-User-ID`` mechanism has been removed — see `docs/api.md`.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,18 +27,34 @@ logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logger = logging.getLogger("promptdna")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Fail clearly and early if authentication is misconfigured. Never fall
+    # back to a hard-coded secret.
+    if not settings.jwt_secret_key:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. The API cannot start without it "
+            "(see .env.example). No insecure fallback secret is used."
+        )
+    logger.info("PromptDNA API starting (env=%s)", settings.environment)
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     version=__version__,
+    lifespan=lifespan,
     # debug is intentionally left False even in development: FastAPI/Starlette
-    # debug mode returns raw tracebacks on 500s, which this API must never do
-    # (see docs/api.md → error handling). Our own handlers format every error.
-    summary="Database-backed knowledge platform for prompt engineering (Phase 2).",
+    # debug mode returns raw tracebacks on 500s, which this API must never do.
+    summary="Database-backed knowledge platform for prompt engineering (Phase 3).",
     description=(
-        "Authentication will be implemented in a later phase. `X-Dev-User-ID` "
-        "is a **development-only** mechanism and must not be used as production "
-        "authentication."
+        "JWT bearer authentication. Register at `POST /api/v1/auth/register`, "
+        "log in at `POST /api/v1/auth/login`, then send "
+        "`Authorization: Bearer <token>`. The Phase 2 `X-Dev-User-ID` header "
+        "has been **removed** and is no longer accepted."
     ),
 )
 

@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # NEVER set this to "*" while credentials are enabled.
     cors_origins: str = "http://localhost:3000"
 
+    # -- Authentication (Phase 3) ------------------------------------
+    # JWT_SECRET_KEY has NO default: auth operations fail clearly if it is
+    # unset (no insecure fallback). Set it in the environment / .env.
+    jwt_secret_key: str | None = None
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+
     # -- Neo4j: supporting graph projection (not used in Phase 0) -------
     neo4j_uri: str | None = None
     neo4j_username: str | None = None

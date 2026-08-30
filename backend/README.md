@@ -1,8 +1,8 @@
 # PromptDNA — Backend
 
-FastAPI + Python. Also home to the **Phase 1 PostgreSQL data layer**: SQLAlchemy
-models, the Alembic migration, and the seed script. No authentication, no CRUD,
-no business logic.
+FastAPI + Python. Layered API (router → schema → service → repository →
+SQLAlchemy → PostgreSQL) with JWT authentication (Phase 3), plus the Phase 1
+data layer (models, Alembic migration, seed script).
 
 ## Requirements
 
@@ -19,29 +19,31 @@ python -m venv .venv
 ```
 
 Configuration comes from environment variables / a repo-root `.env`
-(copy `../.env.example`). `DATABASE_URL` is the only one the data layer needs:
+(copy `../.env.example`). Two settings are needed to run the API:
 
 ```
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME   # Phase 1 schema
+JWT_SECRET_KEY=<strong random value>                               # REQUIRED — no fallback
+# optional: JWT_ALGORITHM=HS256, ACCESS_TOKEN_EXPIRE_MINUTES=30, CORS_ORIGINS=...
 ```
+
+The API **refuses to start** if `JWT_SECRET_KEY` is unset.
 
 ## Run the API
-
-`DATABASE_URL` must point at a database holding the Phase 1 schema.
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
 - `GET /`            → service metadata
-- `GET /health`      → liveness (no DB)
-- `GET /health/db`   → readiness (`SELECT 1`; 503 if PostgreSQL unreachable)
-- `GET /docs`        → OpenAPI UI
-- `POST /api/v1/prompts` · `GET /api/v1/prompts` · `GET /api/v1/prompts/{id}` ·
-  `GET /api/v1/prompts/{id}/versions`
+- `GET /health`      → liveness (no DB) · `GET /health/db` → readiness (`SELECT 1`)
+- `GET /docs`        → OpenAPI UI (has an **Authorize** button)
+- `POST /api/v1/auth/register` · `POST /api/v1/auth/login` · `GET /api/v1/auth/me`
+- `POST/GET /api/v1/prompts` · `GET /api/v1/prompts/{id}` ·
+  `GET /api/v1/prompts/{id}/versions`  — all require `Authorization: Bearer <token>`
 
-Full reference: `../docs/api.md`. Creating a prompt needs a development-only
-header `X-Dev-User-ID: <existing users.user_id>` (not authentication).
+Full reference: `../docs/api.md`. The Phase 2 `X-Dev-User-ID` header has been
+**removed**; ownership comes from the authenticated user.
 
 ## Database: migrate + seed
 
@@ -66,10 +68,12 @@ Alembic resolves the URL from `-x db_url=...`, then `alembic.ini`
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+A test `JWT_SECRET_KEY` is set automatically by `tests/conftest.py`.
+
 - `tests/test_health.py` — runs anywhere, no database.
 - `tests/test_database.py`, `test_seed.py`, `test_zz_migration.py`,
-  `test_api_prompts.py` — require a **real PostgreSQL** throwaway database.
-  Point them at one with:
+  `test_api_prompts.py`, `test_auth.py`, `test_authz.py` — require a **real
+  PostgreSQL** throwaway database. Point them at one with:
 
   ```
   PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test
@@ -85,34 +89,45 @@ Alembic resolves the URL from `-x db_url=...`, then `alembic.ini`
 ```
 backend/
 ├── app/
-│   ├── main.py                FastAPI app: CORS, exception handlers, routers
-│   ├── core/config.py         pydantic-settings configuration (+ CORS, pool)
+│   ├── main.py                FastAPI app: lifespan (JWT-secret check), CORS, handlers, routers
+│   ├── core/
+│   │   ├── config.py          pydantic-settings (+ CORS, DB pool, JWT settings)
+│   │   └── security.py        Argon2 hash/verify + JWT create/decode
 │   ├── api/
-│   │   ├── router.py          aggregates the versioned API under /api/v1
-│   │   ├── deps.py            get_dev_user_id  (X-Dev-User-ID, dev-only)
-│   │   ├── errors.py          AppError types + exception handlers
+│   │   ├── router.py          aggregates /api/v1 (auth + prompts)
+│   │   ├── deps.py            get_current_user (Bearer JWT -> User); CurrentUser
+│   │   ├── errors.py          AppError types (+ 401/403) + exception handlers
 │   │   └── routes/
 │   │       ├── health.py      GET /health, GET /health/db
+│   │       ├── auth.py        POST /auth/register, POST /auth/login, GET /auth/me
 │   │       └── prompts.py     POST/GET /api/v1/prompts, /{id}, /{id}/versions
-│   ├── schemas/prompt.py      PromptCreate / PromptRead / *ListResponse / VersionRead
-│   ├── services/prompt.py     business rules + the create transaction
-│   ├── repositories/prompt.py all SQLAlchemy access (never commits)
+│   ├── schemas/
+│   │   ├── auth.py            RegisterRequest / UserRead / TokenResponse
+│   │   └── prompt.py          PromptCreate / PromptRead / *ListResponse / VersionRead
+│   ├── services/
+│   │   ├── auth.py            register + login (authentication)
+│   │   └── prompt.py          create-transaction + authorization (visibility)
+│   ├── repositories/
+│   │   ├── user.py            get_by_id / get_by_email / add_user
+│   │   └── prompt.py          prompt/version access; list applies visibility predicate
 │   └── db/
 │       ├── base.py            DeclarativeBase + constraint naming convention
-│       ├── models.py          the 9 Phase 1 tables (schema only)
+│       ├── models.py          the 9 Phase 1 tables (schema only — UNCHANGED)
 │       ├── session.py         lazy engine + get_db dependency + build_engine
 │       └── seed.py            deterministic, idempotent dev seed data
 ├── alembic/
 │   ├── env.py                 target_metadata = models; URL from settings/-x
-│   └── versions/0001_initial_schema.py    (unchanged in Phase 2)
+│   └── versions/0001_initial_schema.py    (UNCHANGED — no Phase 2/3 migration)
 ├── alembic.ini
 ├── tests/
-│   ├── conftest.py            PostgreSQL fixtures + API test client (savepoint-isolated)
+│   ├── conftest.py            PostgreSQL fixtures + API client + auth helpers (savepoint-isolated)
 │   ├── test_health.py         no DB
 │   ├── test_database.py       Phase 1: 15 mandated schema checks + extras
 │   ├── test_seed.py           Phase 1
 │   ├── test_zz_migration.py   Phase 1: downgrade base → upgrade head round-trip
-│   └── test_api_prompts.py    Phase 2: API integration tests (real PostgreSQL)
+│   ├── test_api_prompts.py    Phase 2 prompt behavior (now bearer-authed)
+│   ├── test_auth.py           Phase 3: authentication (13 cases + hash check)
+│   └── test_authz.py          Phase 3: authorization + security attack scenario
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```

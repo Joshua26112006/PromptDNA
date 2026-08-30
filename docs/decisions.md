@@ -293,12 +293,134 @@ flow already demonstrates the required transaction architecture.
 
 ---
 
+# Phase 3 decisions (authentication, authorization & ownership)
+
+## Decision 23 — Stateless JWT access tokens (HS256), no server-side sessions
+
+**Decision:** Auth uses a signed JWT bearer access token (`HS256` by default,
+`JWT_ALGORITHM`). `POST /auth/login` issues it; `Authorization: Bearer <token>`
+carries it; `get_current_user` validates it. No sessions/refresh-tokens table.
+
+**Reason:** Simple, standard, and the schema stays untouched. The spec
+explicitly forbids a sessions table and refresh-token infrastructure in this
+phase.
+
+**Trade-off accepted:** A leaked token is valid until `exp`; there is no
+revocation. Documented as a known limitation; refresh + revocation is future
+scope.
+
+---
+
+## Decision 24 — Argon2 password hashing via `pwdlib`
+
+**Decision:** Passwords are hashed with Argon2 (`pwdlib.PasswordHash.recommended()`).
+Only the `$argon2id$…` string is stored in `users.password_hash`. Login uses a
+constant-time `verify`, and runs a dummy verify when the email is unknown to
+even out timing.
+
+**Reason:** Argon2id is a current best-practice memory-hard KDF; `pwdlib` is the
+library FastAPI's own docs recommend. MD5/SHA-1/plaintext are prohibited.
+
+---
+
+## Decision 25 — Minimal JWT claims: `sub`, `iat`, `exp`
+
+**Decision:** The token contains only `sub` (= `user_id`), `iat`, and `exp`
+(= `iat + ACCESS_TOKEN_EXPIRE_MINUTES*60`, default 30 min). No email, name,
+roles, or any private data.
+
+**Reason:** A JWT is signed, not encrypted — anyone can read its payload. Keep it
+to an opaque identity reference + lifetime. Everything else is loaded fresh from
+PostgreSQL per request, so it can't go stale in the token.
+
+---
+
+## Decision 26 — `JWT_SECRET_KEY` is required; no fallback
+
+**Decision:** `JWT_SECRET_KEY` has no default. `core/security._secret()` raises a
+clear error if it is missing, and the app's `lifespan` startup hook refuses to
+start without it. `.env.example` ships an **empty** placeholder.
+
+**Reason:** A hard-coded/dev fallback secret is a real-world vulnerability
+(tokens forgeable by anyone who has read the source). Failing loudly at startup
+is safer than running insecure.
+
+---
+
+## Decision 27 — `get_current_user` FastAPI dependency owns authentication
+
+**Decision:** A single dependency reads the bearer token
+(`OAuth2PasswordBearer`, `auto_error=False`), decodes+validates it, extracts
+`sub`, loads the `User`, and returns it. Any failure → `401` with
+`WWW-Authenticate: Bearer`. Routes just declare `current_user: CurrentUser`.
+
+**Reason:** One tested place for "who is this?"; routes stay thin; Swagger gets
+the Authorize button via `tokenUrl`.
+
+---
+
+## Decision 28 — Prompt ownership authorization lives in the service layer
+
+**Decision:** `prompts.user_id` is the owner. Visibility = *owner OR
+`is_public`*. `services/prompt.py` enforces it for get / list / versions;
+`repositories/prompt.list_prompts` applies it as a SQL `WHERE` predicate that is
+**ANDed** with user-supplied filters. Routes contain no ownership logic. Create
+always sets `user_id`/`created_by` from `current_user`.
+
+**Reason:** Keeps authorization testable and un-bypassable. Applying the
+predicate in SQL (not post-filtering) means `?is_public=false` or `search=` can
+only *narrow* a viewer's own visible set — never widen it.
+
+---
+
+## Decision 29 — Inaccessible private prompts return 404, not 403
+
+**Decision:** When an authenticated user requests a prompt (or its versions)
+they may not see, the API returns `404` with the **same** body as a genuinely
+missing id. `403` is reserved for future "exists and you may not" cases.
+
+**Reason:** `403` on a private resource confirms the id exists — an enumeration
+oracle. `404` leaks nothing. The spec explicitly prefers this.
+
+---
+
+## Decision 30 — Logout is client-side only
+
+**Decision:** No `/auth/logout` endpoint, no token blacklist. "Logging out" =
+the client deletes its stored token.
+
+**Reason:** Stateless JWT + no sessions table (Decision 23). Server-side
+revocation needs infrastructure that is explicitly out of scope this phase.
+
+---
+
+## Decision 31 — Frontend stores the token in `localStorage` (dev build)
+
+**Decision:** The Next.js dev frontend keeps the access token in
+`localStorage` and sends it as an `Authorization` header.
+
+**Reason:** Simplest thing that works for a bearer-token API and keeps the
+backend stateless. Alternatives considered: an in-memory variable (lost on
+refresh — poor DX for a demo) and an HttpOnly cookie (needs the backend to set
+cookies + CSRF handling — more than this phase needs).
+
+**Trade-off accepted (documented, not hidden):** `localStorage` is readable by
+any script on the origin, so a successful XSS would exfiltrate the token. This
+is **not** claimed to be production-secure. A production build should move to an
+HttpOnly, Secure, SameSite cookie issued by the backend, with CSRF protection
+and CORS `allow_credentials` scoped accordingly.
+
+---
+
 ## Non-decisions (still deferred)
 
 - pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.
 - Neo4j integration and PostgreSQL→graph sync mechanism — later phase.
-- Authentication / password hashing (replacing `X-Dev-User-ID`), authorization / prompt visibility rules — later phase.
+- Refresh tokens, server-side token revocation / blacklist, `/auth/logout` — later phase.
+- Roles / permissions / RBAC, SSO — later phase.
+- Rate limiting & brute-force protection on `/auth/*` — later phase (security hardening).
+- HttpOnly-cookie token storage + CSRF — production hardening.
 - Prompt update/delete endpoints, version-creation workflow + its concurrency handling — later phase.
-- Full-text or semantic search; cursor pagination; rate limiting — later phases.
+- Full-text or semantic search; cursor pagination — later phases.
 - Denormalized read models / materialized views — only if a real workload needs them.
 - Production deployment + production CORS configuration — later phase.

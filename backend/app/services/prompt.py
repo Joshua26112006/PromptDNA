@@ -1,26 +1,30 @@
-"""Prompt business logic.
+"""Prompt business logic + authorization.
 
-Transaction boundary of note — :func:`create_prompt_with_initial_version`:
+Authorization rules (Phase 3) — all enforced here, never in routes:
+
+* **Create**: any authenticated user; the caller becomes ``prompts.user_id``.
+* **Read / list / versions**: a prompt is *visible* to a user iff the user
+  owns it **or** ``is_public is True``.
+* An inaccessible private prompt is reported as **404** (same message as a
+  genuinely missing prompt) so a caller cannot probe for its existence.
+
+Transaction boundary — :func:`create_prompt_with_initial_version`:
 
     BEGIN
         INSERT prompts
         INSERT versions (version_number = 1)
     COMMIT            -- both, or neither
-
-If the version insert fails for any reason the whole thing is rolled back, so a
-prompt can never exist without its Version 1.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
 
 from app.api.errors import NotFoundError
-from app.db.models import Prompt, Version
+from app.db.models import Prompt, User
 from app.repositories import prompt as repo
 from app.schemas.prompt import (
     OwnerRead,
@@ -39,7 +43,31 @@ INITIAL_CHANGE_SUMMARY = "Initial version."
 
 
 # --------------------------------------------------------------------------- #
-# Serialization helpers (ORM -> response schema)                             #
+# Authorization helpers                                                      #
+# --------------------------------------------------------------------------- #
+def _can_view(prompt: Prompt, user: User) -> bool:
+    return prompt.user_id == user.user_id or prompt.is_public
+
+
+def _load_viewable_prompt(
+    db: Session, prompt_id: uuid.UUID, user: User
+) -> Prompt:
+    """Return the prompt if the user may view it, else raise 404.
+
+    Missing prompt and access-denied private prompt return the SAME error so
+    existence cannot be probed.
+    """
+
+    prompt = repo.get_prompt_by_id(db, prompt_id)
+    if prompt is None or not _can_view(prompt, user):
+        # Constant message: a denied private prompt is indistinguishable from a
+        # missing one, so callers cannot probe for existence.
+        raise NotFoundError("Prompt not found.")
+    return prompt
+
+
+# --------------------------------------------------------------------------- #
+# Serialization                                                              #
 # --------------------------------------------------------------------------- #
 def _to_prompt_read(prompt: Prompt) -> PromptRead:
     versions = sorted(prompt.versions, key=lambda v: v.version_number)
@@ -65,23 +93,14 @@ def _to_prompt_read(prompt: Prompt) -> PromptRead:
 # Commands                                                                   #
 # --------------------------------------------------------------------------- #
 def create_prompt_with_initial_version(
-    db: Session, *, dev_user_id: uuid.UUID, data: PromptCreate
+    db: Session, *, current_user: User, data: PromptCreate
 ) -> PromptRead:
-    """Create a prompt and its Version 1 atomically. Returns the full prompt.
-
-    Raises :class:`NotFoundError` if the development user does not exist.
-    """
-
-    if repo.get_user_by_id(db, dev_user_id) is None:
-        raise NotFoundError(
-            f"No user exists for X-Dev-User-ID {dev_user_id}. "
-            "(X-Dev-User-ID is a development-only mechanism; see docs/api.md.)"
-        )
+    """Create a prompt owned by ``current_user`` and its Version 1, atomically."""
 
     try:
         prompt = repo.add_prompt(
             db,
-            user_id=dev_user_id,
+            user_id=current_user.user_id,
             title=data.title,
             description=data.description,
             purpose=data.purpose,
@@ -92,7 +111,7 @@ def create_prompt_with_initial_version(
             prompt_id=prompt.prompt_id,
             version_number=INITIAL_VERSION_NUMBER,
             content=data.content,
-            created_by=dev_user_id,
+            created_by=current_user.user_id,
             change_summary=INITIAL_CHANGE_SUMMARY,
         )
         db.commit()
@@ -101,7 +120,6 @@ def create_prompt_with_initial_version(
         logger.exception("create_prompt_with_initial_version failed; rolled back")
         raise
 
-    # Reload with relationships for the response.
     created = repo.get_prompt_by_id(db, prompt.prompt_id)
     assert created is not None  # just committed
     return _to_prompt_read(created)
@@ -110,23 +128,28 @@ def create_prompt_with_initial_version(
 # --------------------------------------------------------------------------- #
 # Queries                                                                    #
 # --------------------------------------------------------------------------- #
-def get_prompt(db: Session, prompt_id: uuid.UUID) -> PromptRead:
-    prompt = repo.get_prompt_by_id(db, prompt_id)
-    if prompt is None:
-        raise NotFoundError(f"Prompt {prompt_id} not found.")
-    return _to_prompt_read(prompt)
+def get_prompt(
+    db: Session, prompt_id: uuid.UUID, *, current_user: User
+) -> PromptRead:
+    return _to_prompt_read(_load_viewable_prompt(db, prompt_id, current_user))
 
 
 def list_prompts(
     db: Session,
     *,
+    current_user: User,
     limit: int,
     offset: int,
     search: str | None = None,
     is_public: bool | None = None,
 ) -> PromptListResponse:
     rows, total = repo.list_prompts(
-        db, limit=limit, offset=offset, search=search, is_public=is_public
+        db,
+        viewer_id=current_user.user_id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        is_public=is_public,
     )
     items = [
         PromptListItem(
@@ -145,9 +168,10 @@ def list_prompts(
     return PromptListResponse(items=items, limit=limit, offset=offset, total=total)
 
 
-def list_versions(db: Session, prompt_id: uuid.UUID) -> VersionListResponse:
-    if not repo.prompt_exists(db, prompt_id):
-        raise NotFoundError(f"Prompt {prompt_id} not found.")
-    versions: Sequence[Version] = repo.list_versions_for_prompt(db, prompt_id)
+def list_versions(
+    db: Session, prompt_id: uuid.UUID, *, current_user: User
+) -> VersionListResponse:
+    _load_viewable_prompt(db, prompt_id, current_user)  # 404 if not viewable
+    versions = repo.list_versions_for_prompt(db, prompt_id)
     items = [VersionRead.model_validate(v) for v in versions]
     return VersionListResponse(items=items, total=len(items))

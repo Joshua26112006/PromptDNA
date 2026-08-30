@@ -28,8 +28,9 @@ class PromptCreate(BaseModel):
     """Body for ``POST /api/v1/prompts``.
 
     ``prompt_id`` / ``user_id`` / ``parent_prompt_id`` / ``created_at`` /
-    ``updated_at`` are intentionally NOT accepted from the client. The owner is
-    supplied out-of-band via the ``X-Dev-User-ID`` development header.
+    ``updated_at`` are intentionally NOT accepted from the client (``extra`` is
+    forbidden). The owner is always the authenticated user from the
+    ``Authorization: Bearer`` token.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)

@@ -21,6 +21,7 @@ class AppError(Exception):
 
     status_code = 500
     detail = "Internal server error"
+    headers: dict[str, str] | None = None
 
     def __init__(self, detail: str | None = None) -> None:
         if detail is not None:
@@ -31,6 +32,17 @@ class AppError(Exception):
 class BadRequestError(AppError):
     status_code = 400
     detail = "Bad request"
+
+
+class UnauthorizedError(AppError):
+    status_code = 401
+    detail = "Not authenticated"
+    headers = {"WWW-Authenticate": "Bearer"}
+
+
+class ForbiddenError(AppError):
+    status_code = 403
+    detail = "Forbidden"
 
 
 class NotFoundError(AppError):
@@ -53,7 +65,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
         # Expected errors: log at info, return the (safe) detail.
         logger.info("AppError %s: %s", exc.status_code, exc.detail)
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers,
+        )
 
     @app.exception_handler(IntegrityError)
     async def _handle_integrity_error(_: Request, exc: IntegrityError) -> JSONResponse:

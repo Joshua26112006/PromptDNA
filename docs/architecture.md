@@ -116,15 +116,63 @@ HTTP request
   `GET /api/v1/prompts/{id}`, `GET /api/v1/prompts/{id}/versions`.
 - **Transaction**: creating a prompt inserts the prompt **and its Version 1**
   atomically; failure of either rolls back both.
-- **Dev user**: `X-Dev-User-ID` header names an existing user (owner of created
-  prompts). Development-only, not authentication — see `api.md`.
+- **Dev user (Phase 2 only, REMOVED in Phase 3)**: `X-Dev-User-ID` header named
+  an existing user. Replaced by JWT auth below.
 - **Errors**: uniform `{"detail": …}`; no SQL/credentials/stack traces to
   clients; app runs `debug=False`.
 - **CORS**: explicit origin allow-list from `CORS_ORIGINS` (no `*`).
 - **No schema change.** No new migration.
 
-Explicitly **out of scope** for Phase 2 (later phases): authentication/JWT/OAuth,
-Neo4j, pgvector/embeddings/semantic search, AI model calls, prompt
-update/delete, version creation/editing, dashboard, analytics.
+## Phase 3 scope (done) — authentication, authorization & user ownership
+
+```
+Next.js (login / register / me pages; token in localStorage)
+    │  Authorization: Bearer <JWT>
+    ▼
+CORS  →  FastAPI
+    ▼
+get_current_user            app/api/deps.py
+  • verify JWT signature + expiry (app/core/security.py, PyJWT / HS256)
+  • sub -> user_id -> load User from PostgreSQL
+    ▼
+Authorization (per resource)   app/services/prompt.py
+  • owner OR is_public  →  allowed
+  • otherwise           →  404 (no existence oracle)
+    ▼
+Service layer  →  Repository  →  SQLAlchemy 2.x  →  PostgreSQL
+```
+
+- **Registration**: `POST /api/v1/auth/register` — validates name/email/password
+  (8–128), normalises email to lower-case, checks for an existing account
+  (`409`), stores only the **Argon2** hash (`pwdlib`). Returns the safe profile.
+- **Login**: `POST /api/v1/auth/login` — OAuth2 password form (`username` =
+  email). Verifies against the hash; **generic `401`** ("Invalid email or
+  password.") for any failure. Issues a JWT access token.
+- **JWT**: minimal claims `sub` (= `user_id`), `iat`, `exp`
+  (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 30). `JWT_SECRET_KEY` from environment;
+  **no fallback** — the app refuses to start without it. Never logged/returned.
+- **Current-user dependency**: `get_current_user` → `401` for missing /
+  malformed / bad-signature / expired token, or a `sub` with no matching user
+  (`WWW-Authenticate: Bearer`).
+- **`GET /api/v1/auth/me`**: returns the authenticated profile.
+- **X-Dev-User-ID removed**: no longer read anywhere; sending it does nothing.
+  Prompt ownership (`prompts.user_id`, `versions.created_by`) is taken from the
+  token — the client cannot set or spoof it.
+- **Prompt authorization** (service layer, never in routes): a prompt is visible
+  iff the caller owns it **or** `is_public = true`. `GET /prompts` applies this
+  as a SQL predicate ANDed with user filters (no query param can widen it).
+  Single-prompt / versions access → **404** when not visible.
+- **Logout**: stateless — client discards the token. No server-side revocation,
+  no sessions table.
+- **Token storage (frontend)**: `localStorage` for this dev build; XSS
+  trade-off documented in `decisions.md`.
+- **No schema change.** `users.password_hash` (Phase 1) is sufficient. No new
+  migration; `alembic check` stays clean.
+- **CORS** unchanged: explicit origin allow-list + credentials.
+
+Explicitly **out of scope** for Phase 3 (later phases): refresh tokens,
+server-side revocation, RBAC / roles, SSO, rate limiting, Neo4j,
+pgvector/embeddings/semantic search, AI model calls, prompt update/delete,
+version creation, dashboard, analytics.
 
 Full endpoint reference: `api.md`.

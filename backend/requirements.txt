@@ -1,10 +1,16 @@
-# Runtime dependencies — PromptDNA backend (Phase 0 foundation)
+# Runtime dependencies — PromptDNA backend
 
 fastapi>=0.115,<0.116
 uvicorn[standard]>=0.32,<0.35
 pydantic-settings>=2.5,<3
 
-# Database groundwork for Phase 1 (no schema / models yet).
+# Database (Phase 1+): SQLAlchemy models + Alembic migrations, PostgreSQL driver.
 SQLAlchemy>=2.0,<2.1
 alembic>=1.13,<2
 psycopg[binary]>=3.2,<4
+
+# Authentication (Phase 3): JWT access tokens + Argon2 password hashing.
+PyJWT>=2.9,<3
+pwdlib[argon2]>=0.2.1,<1
+email-validator>=2.1,<3          # pydantic EmailStr
+python-multipart>=0.0.9,<1       # OAuth2 login form parsing
