@@ -1,9 +1,12 @@
 """Alembic migration environment.
 
-Phase 0 note: there are NO models and NO migrations yet. This file only wires
-Alembic to the application's ``DATABASE_URL`` so that Phase 1 can start adding
-revisions without further plumbing. ``target_metadata`` stays ``None`` until the
-SQLAlchemy models are introduced.
+The database URL is resolved (in priority order):
+  1. ``-x db_url=...`` passed on the command line,
+  2. ``sqlalchemy.url`` in alembic.ini (left blank by default),
+  3. the application's ``DATABASE_URL`` setting (app/core/config.py).
+
+``target_metadata`` is the SQLAlchemy models' metadata so ``--autogenerate``
+and ``alembic check`` work.
 """
 
 from __future__ import annotations
@@ -19,30 +22,33 @@ from sqlalchemy import engine_from_config, pool
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.db import models as _models  # noqa: E402,F401  (registers tables)
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Resolve the database URL from application settings unless one was passed
-# explicitly on the command line (`-x db_url=...` or `sqlalchemy.url`).
-_settings = get_settings()
-if not config.get_main_option("sqlalchemy.url"):
-    if _settings.database_url:
-        config.set_main_option("sqlalchemy.url", _settings.database_url)
+_x_args = context.get_x_argument(as_dictionary=True)
+_url = (
+    _x_args.get("db_url")
+    or config.get_main_option("sqlalchemy.url")
+    or get_settings().database_url
+)
+if _url:
+    config.set_main_option("sqlalchemy.url", _url)
 
-# No models yet — autogenerate is intentionally not wired up in Phase 0.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -55,7 +61,11 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

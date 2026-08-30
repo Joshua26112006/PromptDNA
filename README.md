@@ -90,19 +90,32 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-### 4. Local databases (optional)
+### 4. Database (Phase 1)
 
 ```bash
-cd database
-docker compose up -d
+cd database && docker compose up -d          # optional local PostgreSQL + Neo4j
+cd ../backend
+./.venv/Scripts/alembic.exe upgrade head      # create the 9-table schema
+./.venv/Scripts/python.exe -m app.db.seed     # deterministic dev data
 ```
 
-## Project status — Phase 0 (foundation)
+See [`docs/database-design.md`](docs/database-design.md) for the full schema and
+[`database/examples.sql`](database/examples.sql) for demonstration queries.
 
-**Done:** monorepo structure, runnable frontend shell, runnable FastAPI backend
-with `GET /health`, environment configuration, Alembic wired to `DATABASE_URL`
-with **no schema**, architecture documentation.
+## Project status
 
-**Not started (by design):** dashboard, authentication, prompt CRUD, semantic
-search, Neo4j integration, experiments, analytics, the final database schema, and
-production deployment.
+### Phase 0 — foundation ✅
+Monorepo structure, runnable frontend shell, runnable FastAPI backend with
+`GET /health`, environment configuration, architecture documentation.
+
+### Phase 1 — PostgreSQL relational core ✅
+Nine tables (`users`, `prompts`, `versions`, `models`, `experiments`, `tags`,
+`collections`, `prompt_tags`, `prompt_collections`) as SQLAlchemy models + one
+Alembic migration (`alembic check` clean), UUID PKs, locked `ON DELETE`
+behavior, `CHECK` constraints, justified B-tree indexes, `TIMESTAMPTZ`
+timestamps, deterministic seed data, and a PostgreSQL-backed test suite
+(15 mandated schema checks + extras).
+
+### Not started (by design)
+pgvector / embeddings / semantic search, Neo4j integration, authentication,
+prompt CRUD APIs, dashboard, analytics UI, production deployment.

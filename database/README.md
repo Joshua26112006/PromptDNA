@@ -1,51 +1,78 @@
 # PromptDNA — Database
 
 PostgreSQL is the **system of record**. Neo4j is a **supporting graph
-projection** for prompt relationships / lineage. `pgvector` is a PostgreSQL
-extension (not a separate database) used for embeddings and semantic
-similarity search.
+projection** for prompt relationships / lineage (later phase). `pgvector` is a
+PostgreSQL extension (not a separate database) for embeddings / semantic search
+(later phase).
 
 ```
 PostgreSQL
-  ├── relational data
-  └── pgvector  ──►  embeddings / semantic search
+  ├── relational data                 <-- Phase 1 (implemented)
+  └── pgvector  ──►  embeddings / semantic search   (later)
 
 Neo4j
-  └── prompt relationships / lineage  (projection of PostgreSQL)
+  └── prompt relationships / lineage  (projection of PostgreSQL, later)
 ```
 
-## Phase 0 status
+## Phase 1 status — implemented
 
-- **No schema exists yet.** The relational schema is designed and implemented
-  in Phase 1. See `../docs/database-design.md` for the approved plan.
-- Migrations are managed with **Alembic**, configured under
-  `../backend/alembic/` (`../backend/alembic.ini`). The `versions/` directory
-  is intentionally empty.
-- Neo4j is **not** integrated in Phase 0.
+- **9 tables**: `users`, `prompts`, `versions`, `models`, `experiments`,
+  `tags`, `collections`, `prompt_tags`, `prompt_collections`.
+- Schema is defined by SQLAlchemy models in
+  `../backend/app/db/models.py` and created by the Alembic migration
+  `../backend/alembic/versions/0001_initial_schema.py`. `alembic check` confirms
+  the two agree.
+- UUID primary keys, explicit foreign keys with locked `ON DELETE` behavior,
+  `CHECK` constraints, `TIMESTAMPTZ` timestamps, and a small set of justified
+  B-tree indexes. Full details: `../docs/database-design.md`.
+- **No** pgvector, embeddings, semantic search, or Neo4j — those are later
+  phases.
+
+## Files here
+
+| File | Purpose |
+|------|---------|
+| `examples.sql` | 10 demonstration queries + an `EXPLAIN` / index-inspection section. Read-only; not wired to any API. |
+| `docker-compose.yml` | Optional local PostgreSQL (`pgvector/pgvector` image) + Neo4j for development. Not a production deployment. |
+
+## Create and populate the schema
+
+From an empty PostgreSQL database:
+
+```bash
+cd ../backend
+./.venv/Scripts/alembic.exe upgrade head        # create all 9 tables
+./.venv/Scripts/python.exe -m app.db.seed        # deterministic dev data (rerunnable)
+```
+
+Reset / round-trip:
+
+```bash
+./.venv/Scripts/alembic.exe downgrade base       # drop everything
+./.venv/Scripts/alembic.exe upgrade head
+```
+
+The URL comes from `DATABASE_URL` (see repo-root `.env.example`);
+`alembic.ini`'s `sqlalchemy.url` is intentionally blank.
+
+## Run the demonstration queries
+
+With a client that has `psql`:
+
+```bash
+psql "$DATABASE_URL" -f examples.sql
+```
+
+(Load the seed data first so the queries return rows.)
 
 ## Local development databases (optional)
 
-`docker-compose.yml` starts a local PostgreSQL (with the `pgvector` extension
-available) and a local Neo4j, for development only. It is **not** a production
-deployment (production is planned later on Neon + Neo4j Aura).
-
 ```bash
 cd database
-docker compose up -d      # start
+docker compose up -d      # start PostgreSQL + Neo4j
 docker compose down       # stop
 docker compose down -v    # stop and delete local data
 ```
 
-Then set `DATABASE_URL` / `NEO4J_*` in the repo-root `.env` to match.
-
-## Running migrations (Phase 1 onward)
-
-```bash
-cd backend
-./.venv/Scripts/alembic upgrade head          # Windows
-# .venv/bin/alembic upgrade head              # macOS / Linux
-```
-
-The database URL is read from the application's `DATABASE_URL` setting
-(`backend/app/core/config.py`); `alembic.ini` deliberately leaves
-`sqlalchemy.url` blank.
+Then set `DATABASE_URL` in the repo-root `.env` to match, e.g.
+`postgresql+psycopg://promptdna:promptdna@localhost:5432/promptdna`.
