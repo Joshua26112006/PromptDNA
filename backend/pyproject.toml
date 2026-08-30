@@ -1,0 +1,10 @@
+[project]
+name = "promptdna-backend"
+version = "0.0.0"
+description = "PromptDNA backend — FastAPI foundation (Phase 0)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

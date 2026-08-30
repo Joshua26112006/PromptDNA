@@ -1,0 +1,31 @@
+# Local development databases for PromptDNA. NOT a production deployment.
+# Production is planned later on Neon (PostgreSQL) and Neo4j Aura.
+
+services:
+  postgres:
+    # Includes the pgvector extension so `CREATE EXTENSION vector;` works.
+    image: pgvector/pgvector:pg16
+    container_name: promptdna-postgres
+    environment:
+      POSTGRES_USER: promptdna
+      POSTGRES_PASSWORD: promptdna
+      POSTGRES_DB: promptdna
+    ports:
+      - "5432:5432"
+    volumes:
+      - promptdna_pg_data:/var/lib/postgresql/data
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: promptdna-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/promptdna_dev
+    ports:
+      - "7474:7474" # HTTP browser
+      - "7687:7687" # Bolt
+    volumes:
+      - promptdna_neo4j_data:/data
+
+volumes:
+  promptdna_pg_data:
+  promptdna_neo4j_data:
