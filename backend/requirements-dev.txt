@@ -3,4 +3,5 @@
 -r requirements.txt
 
 pytest>=8,<9
-httpx>=0.27,<0.29
+# httpx is a runtime dependency (see requirements.txt) — the test client
+# (fastapi.testclient / starlette) reuses it, so it is not repeated here.

@@ -1,12 +1,23 @@
 -- ===========================================================================
--- PromptDNA — demonstration queries (Phase 1, PostgreSQL)
+-- PromptDNA — demonstration queries (Phases 1 + 6, PostgreSQL / pgvector)
 -- ---------------------------------------------------------------------------
--- Read-only examples that exercise the relational schema. They are NOT wired
--- to any API. Load the seed data first:
+-- Read-only examples that exercise the hybrid database. They are NOT wired to
+-- any API. Sections:
+--   1..10   relational schema (JOINs, recursive lineage CTE, aggregates)
+--   (a..d)  query-plan / index inspection
+--   11..13  pgvector cosine similarity + semantic-search ordering (Phase 6)
+--   (e)     EXPLAIN a nearest-neighbour ordering
+--   Cypher  reference queries for the Neo4j graph projection (Phase 7)
 --
---     cd backend && ./.venv/Scripts/python.exe -m app.db.seed
+-- Setup:
+--     cd backend
+--     ./.venv/Scripts/python.exe -m app.db.seed                 # relational rows
+--     ./.venv/Scripts/python.exe scripts/generate_embeddings.py # needs pgvector
 --
 -- then run:  psql "$DATABASE_URL" -f database/examples.sql
+--
+-- The pgvector queries (11..13, e) require migration 0002 (the versions.embedding
+-- column). Without generated embeddings they simply return no rows.
 -- ===========================================================================
 
 
@@ -167,3 +178,104 @@ SELECT tablename, indexname, indexdef
 FROM pg_indexes
 WHERE schemaname = 'public'
 ORDER BY tablename, indexname;
+
+
+-- ===========================================================================
+-- pgvector — semantic search (Phase 6)
+-- ---------------------------------------------------------------------------
+-- pgvector runs INSIDE PostgreSQL. `<=>` is the cosine-distance operator;
+-- cosine similarity = 1 - (a <=> b). The API embeds the user's query text and
+-- runs query 12; here we use an existing embedding as the "query vector" so no
+-- 1536-number literal is needed. Requires migration 0002 + generated embeddings.
+-- ===========================================================================
+
+-- 11. Cosine distance / similarity between versions of one prompt ---------
+SELECT a.version_number                    AS from_version,
+       b.version_number                    AS to_version,
+       a.embedding <=> b.embedding         AS cosine_distance,
+       1 - (a.embedding <=> b.embedding)   AS cosine_similarity
+FROM versions a
+JOIN versions b ON b.prompt_id = a.prompt_id AND b.version_id <> a.version_id
+JOIN prompts p  ON p.prompt_id = a.prompt_id
+WHERE p.title = 'SQL Query Optimizer'
+  AND a.embedding IS NOT NULL
+  AND b.embedding IS NOT NULL
+ORDER BY from_version, to_version;
+
+
+-- 12. Semantic-search ordering: nearest versions to a chosen query vector -
+--     Mirrors app/repositories/version.py::semantic_search — closest by cosine
+--     distance first, with the same visibility rule (owner OR public) the API
+--     applies inside the SQL. Here the "query" is the oldest embedded version.
+WITH query AS (
+    SELECT embedding AS qvec
+    FROM versions
+    WHERE embedding IS NOT NULL
+    ORDER BY created_at
+    LIMIT 1
+)
+SELECT p.title,
+       v.version_number,
+       v.embedding_model,
+       1 - (v.embedding <=> q.qvec) AS similarity
+FROM versions v
+JOIN prompts p ON p.prompt_id = v.prompt_id
+CROSS JOIN query q
+WHERE v.embedding IS NOT NULL
+  AND p.is_public                       -- API also allows: OR p.user_id = :viewer
+ORDER BY v.embedding <=> q.qvec         -- cosine distance ASC = most similar first
+LIMIT 5;
+
+
+-- 13. Confirm the HNSW index and its cosine operator class --------------
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND indexname = 'ix_versions_embedding_hnsw';
+
+
+-- (e) EXPLAIN a nearest-neighbour ordering. (See the NOTE above: at seed-data
+--     size the planner may still choose a sequential scan — this shows *how* to
+--     inspect it, not a performance result.)
+EXPLAIN
+WITH query AS (
+    SELECT embedding AS qvec FROM versions WHERE embedding IS NOT NULL LIMIT 1
+)
+SELECT v.version_id
+FROM versions v CROSS JOIN query q
+WHERE v.embedding IS NOT NULL
+ORDER BY v.embedding <=> q.qvec
+LIMIT 5;
+
+
+-- ===========================================================================
+-- Neo4j graph projection (Phase 7) — CYPHER, not SQL
+-- ---------------------------------------------------------------------------
+-- Run these in the Neo4j Browser (http://localhost:7474) or cypher-shell, NOT
+-- in psql. Neo4j is a derived, one-way projection of PostgreSQL. Populate it:
+--     cd backend && ./.venv/Scripts/python.exe -m scripts.sync_neo4j
+--
+-- It contains ONLY (:Prompt {prompt_id, title}) nodes (prompt_id == the
+-- PostgreSQL prompts.prompt_id) and the relationship types DERIVED_FROM /
+-- FORKED_FROM / DEPENDS_ON. FORKED_FROM and DEPENDS_ON are modelled but never
+-- populated: the relational schema has no authoritative source for them.
+--
+--   // The whole derivation forest (transitive DERIVED_FROM chains):
+--   MATCH p = (:Prompt)-[:DERIVED_FROM*]->(:Prompt)
+--   RETURN p;
+--
+--   // Ancestors of one prompt, with depth (the data the
+--   // GET /api/v1/graph/prompts/{id}/ancestors endpoint returns, before it
+--   // re-authorizes every node against PostgreSQL):
+--   MATCH path = (start:Prompt {prompt_id: $prompt_id})
+--                -[:DERIVED_FROM|FORKED_FROM*1..10]->(ancestor:Prompt)
+--   RETURN ancestor.prompt_id, ancestor.title, length(path) AS depth
+--   ORDER BY depth;
+--
+--   // Inventory — should be ONLY the Prompt label and (currently) DERIVED_FROM:
+--   MATCH (n)          RETURN DISTINCT labels(n) AS labels, count(*) AS n;
+--   MATCH ()-[r]->()   RETURN type(r) AS rel_type, count(*) AS n ORDER BY rel_type;
+--
+--   // The single schema object created by init_schema():
+--   SHOW CONSTRAINTS;
+-- ===========================================================================

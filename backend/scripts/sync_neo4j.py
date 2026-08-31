@@ -12,6 +12,10 @@ or relationships. `--prune` additionally removes Neo4j :Prompt nodes whose
 prompt_id no longer exists in PostgreSQL (scoped single-node DETACH DELETE, not
 a full-graph wipe).
 
+`--dry-run` reads PostgreSQL only and prints the operations it *would* perform.
+It never contacts Neo4j: no connectivity check, no constraint creation, no node
+or relationship writes, no pruning.
+
 Only DERIVED_FROM is projected: `prompts.parent_prompt_id` is the only
 authoritative relationship field in the schema. FORKED_FROM / DEPENDS_ON are
 part of the graph model but have no PostgreSQL source column, so the projection
@@ -42,6 +46,30 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    # Read the authoritative PostgreSQL data (needed in both modes).
+    engine = build_engine()
+    with Session(engine) as db:
+        rows = db.execute(
+            select(Prompt.prompt_id, Prompt.title, Prompt.parent_prompt_id)
+        ).all()
+    engine.dispose()
+    print(f"PostgreSQL: {len(rows)} prompt(s).")
+    pg_ids = {str(r.prompt_id) for r in rows}
+
+    # --- dry run: PostgreSQL only, no Neo4j contact whatsoever --------------
+    if args.dry_run:
+        for r in rows:
+            print(f"  would MERGE node {r.prompt_id}"
+                  + (f" -[:DERIVED_FROM]-> {r.parent_prompt_id}"
+                     if r.parent_prompt_id else ""))
+        if args.prune:
+            print("  --prune: orphan :Prompt nodes would be removed; the exact "
+                  "set needs a Neo4j read, which --dry-run skips.")
+        print("dry run — Neo4j was not contacted; no constraints, nodes, "
+              "relationships, or pruning were written.")
+        return 0
+
+    # --- real sync: Neo4j is contacted from here on ------------------------
     try:
         verify_connectivity()
     except GraphUnavailable as exc:
@@ -50,40 +78,23 @@ def main() -> int:
 
     graph.init_schema()
 
-    engine = build_engine()
     nodes_created = rels_created = nodes_pruned = 0
-    with Session(engine) as db:
-        rows = db.execute(
-            select(Prompt.prompt_id, Prompt.title, Prompt.parent_prompt_id)
-        ).all()
-        print(f"PostgreSQL: {len(rows)} prompt(s).")
-        pg_ids = {str(r.prompt_id) for r in rows}
+    for r in rows:
+        nodes_created += graph.merge_prompt_node(str(r.prompt_id), r.title)
+        if r.parent_prompt_id is not None:
+            rels_created += graph.merge_relationship(
+                str(r.prompt_id), str(r.parent_prompt_id), "DERIVED_FROM"
+            )
 
-        for r in rows:
-            if args.dry_run:
-                print(f"  would MERGE node {r.prompt_id}"
-                      + (f" -[:DERIVED_FROM]-> {r.parent_prompt_id}"
-                         if r.parent_prompt_id else ""))
-                continue
-            nodes_created += graph.merge_prompt_node(str(r.prompt_id), r.title)
-            if r.parent_prompt_id is not None:
-                rels_created += graph.merge_relationship(
-                    str(r.prompt_id), str(r.parent_prompt_id), "DERIVED_FROM"
-                )
+    if args.prune:
+        for orphan in graph.all_prompt_ids() - pg_ids:
+            nodes_pruned += graph.delete_prompt_node(orphan)
 
-        if args.prune and not args.dry_run:
-            for orphan in graph.all_prompt_ids() - pg_ids:
-                nodes_pruned += graph.delete_prompt_node(orphan)
-
-    engine.dispose()
     close_driver()
 
-    if args.dry_run:
-        print("dry run — no changes made.")
-    else:
-        print(f"done — nodes created: {nodes_created}, relationships created: "
-              f"{rels_created}, nodes pruned: {nodes_pruned} "
-              f"(existing nodes/relationships were left unchanged).")
+    print(f"done — nodes created: {nodes_created}, relationships created: "
+          f"{rels_created}, nodes pruned: {nodes_pruned} "
+          f"(existing nodes/relationships were left unchanged).")
     return 0
 
 

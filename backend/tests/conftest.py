@@ -308,6 +308,38 @@ def user_b(client) -> AuthUser:
 # --------------------------------------------------------------------------- #
 # Phase 7 — Neo4j graph fixtures                                              #
 # --------------------------------------------------------------------------- #
+def _wipe_prompt_subgraph() -> None:
+    """DETACH DELETE every ``:Prompt`` node in the test Neo4j."""
+
+    from app.graph.client import close_driver, get_database, get_driver
+
+    with get_driver().session(database=get_database()) as s:
+        s.run("MATCH (p:Prompt) DETACH DELETE p")
+    close_driver()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _neo4j_session_isolation():
+    """Keep the shared Neo4j hermetic across the whole suite.
+
+    Neo4j has no per-test transaction rollback like PostgreSQL. When the graph
+    projection is enabled (``NEO4J_ENABLED=true``, set above when the container
+    is reachable), every prompt-creating API test in the suite — not just the
+    graph tests — writes a ``:Prompt`` node to the shared Neo4j through the
+    ``project_prompt_after_commit`` post-commit hook. The PostgreSQL side is
+    rolled back; the Neo4j node would otherwise persist. Purge the ``:Prompt``
+    subgraph once before and once after the session so a test run leaves the
+    container as it found it. Individual graph tests still get their own
+    per-test ``graph_clean``.
+    """
+
+    if NEO4J_AVAILABLE:
+        _wipe_prompt_subgraph()
+    yield
+    if NEO4J_AVAILABLE:
+        _wipe_prompt_subgraph()
+
+
 @pytest.fixture
 def graph_clean():
     """Give each graph test an empty :Prompt subgraph.
@@ -316,13 +348,6 @@ def graph_clean():
     strategy. Run graph tests against a disposable Neo4j.
     """
 
-    from app.graph.client import close_driver, get_database, get_driver
-
-    def _wipe():
-        with get_driver().session(database=get_database()) as s:
-            s.run("MATCH (p:Prompt) DETACH DELETE p")
-
-    _wipe()
+    _wipe_prompt_subgraph()
     yield
-    _wipe()
-    close_driver()
+    _wipe_prompt_subgraph()

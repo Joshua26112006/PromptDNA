@@ -26,8 +26,10 @@ Neo4j       ── supporting graph projection
   separate database.
 - **Neo4j is a projection** of prompt-to-prompt relationships for variable-depth
   traversal; never the source of truth.
-- The **embedding provider is a replaceable abstraction**; the vector dimension
-  is intentionally undecided until the embedding model is chosen.
+- The **embedding provider is a replaceable abstraction**. The active model
+  (`text-embedding-3-small`) fixes the vector dimension at **1536**
+  (`versions.embedding vector(1536)`, set by migration `0002`); changing the
+  model means a new migration and re-embedding.
 
 See [`docs/architecture.md`](docs/architecture.md),
 [`docs/database-design.md`](docs/database-design.md), and
