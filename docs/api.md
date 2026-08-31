@@ -292,13 +292,54 @@ automatic AI scoring. Non-owner → `403` (public) / `404` (private). Never touc
 the version or the execution result. Semantic-similarity scores (a later phase)
 are a different concept.
 
-## Search
+## Search — two modes
 
-`GET /api/v1/prompts?search=` is **lexical only**: a case-insensitive `ILIKE`
-substring match on `prompts.title` (wildcards in the term are escaped). It is
-applied *after* the visibility predicate, so it can never surface another user's
-private prompt. **Future phase:** semantic / vector search (pgvector + embeddings)
-— not implemented here.
+### Lexical (`GET /api/v1/prompts?search=`)
+Case-insensitive `ILIKE` substring match on `prompts.title` (wildcards escaped),
+applied *after* the visibility predicate. Never called "AI search".
+
+### Semantic (`GET /api/v1/search/semantic`, Phase 6)  *(auth required)*
+
+Finds prompts with similar **meaning** even when the wording differs, by
+comparing embedding vectors in pgvector.
+
+| param | type | rules |
+|-------|------|-------|
+| `query` | string | required, 1–2000 chars |
+| `limit` | int | default 10, 1–50 |
+| `is_public` | bool | optional filter |
+| `owner` | bool | restrict to the caller's own prompts |
+
+Flow: authenticate → validate (empty → `422`/`400`) → embed the query with the
+active `EmbeddingProvider` → nearest `versions` by **cosine distance**
+(`embedding <=> :qvec`, HNSW index) → **the visibility predicate is part of the
+SQL query** (`prompts.user_id = :viewer OR prompts.is_public`), so other users'
+private prompts are never scored → return results with a `similarity`
+(`1 - cosine_distance`; higher = closer). **Raw vectors are never returned.**
+
+`SemanticSearchResponse`: `{query, count, results: [{prompt_id, version_id,
+prompt_title, version_number, content_preview, similarity, is_public,
+created_at}]}`. `similarity` is a **semantic-similarity** score (meaning
+closeness) — not an experiment `score` (model-run quality).
+
+Responses: `200`; `422`/`400` (bad/empty query); `401`; `503` if the embedding
+provider is unconfigured, temporarily failing, or pgvector is not available on
+this deployment.
+
+### `POST /api/v1/versions/{version_id}/embedding`  *(owner only)*
+(Re)generate the embedding for one version. Only the prompt owner may trigger it
+(it can cost money). Never modifies `versions.content`; a provider failure
+leaves the version intact and can be retried. `503` if the provider is
+unconfigured / pgvector absent. → `VersionEmbeddingStatus {version_id,
+has_embedding, embedding_model, dimension}`.
+
+### `GET /api/v1/versions/{version_id}/embedding`
+Embedding status for a version (visibility = the parent prompt's).
+
+### Batch backfill
+`backend/scripts/generate_embeddings.py [--limit N] [--dry-run]` — finds versions
+without an embedding, generates + stores them, reports successes/failures. A
+dev/admin tool, not an HTTP endpoint (avoids unbounded API cost).
 
 ## Authorization rules (summary)
 

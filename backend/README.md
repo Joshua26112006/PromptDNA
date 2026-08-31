@@ -112,15 +112,23 @@ backend/
 │   │   ├── mock.py            MockProvider (provider "mock" — dev/tests, deterministic)
 │   │   ├── openai.py          OpenAIProvider (real, httpx; needs OPENAI_API_KEY)
 │   │   └── registry.py        models.provider string -> provider instance
+│   ├── embeddings/           EmbeddingProvider abstraction (Phase 6)
+│   │   ├── base.py            EmbeddingProvider + typed EmbeddingError subclasses
+│   │   ├── mock.py            MockEmbeddingProvider (deterministic, dim 1536)
+│   │   ├── openai.py          OpenAIEmbeddingProvider (text-embedding-3-small)
+│   │   └── registry.py        one active provider from EMBEDDING_PROVIDER
 │   ├── services/
 │   │   ├── auth.py            register + login (authentication)
 │   │   ├── prompt.py          create/append/patch transactions + authorization
-│   │   └── experiment.py      run experiment (2-transaction), score, retrieval, list_models
+│   │   ├── experiment.py      run experiment (2-transaction), score, retrieval, list_models
+│   │   ├── embedding.py       (re)generate a version's embedding; status; auto-embed hook
+│   │   └── search.py          semantic search (embed query -> pgvector cosine, visibility-filtered)
 │   ├── repositories/
 │   │   ├── user.py            get_by_id / get_by_email / add_user
 │   │   ├── prompt.py          prompt/version access; visibility predicate; version-number; update
 │   │   ├── model.py           get_by_id / list_all
-│   │   └── experiment.py      add / get (with model+version+prompt) / list_for_prompt|version / apply_result / update_score
+│   │   ├── experiment.py      add / get / list_for_prompt|version / apply_result / update_score
+│   │   └── version.py         embedding read/write + semantic_search (visibility inside the query)
 │   └── db/
 │       ├── base.py            DeclarativeBase + constraint naming convention
 │       ├── models.py          the 9 Phase 1 tables (schema only — UNCHANGED)
@@ -141,7 +149,9 @@ backend/
 │   ├── test_authz.py          Phase 3: authorization + security attack scenario
 │   ├── test_versions.py       Phase 4A: version append / numbering / immutability / retrieval / 409
 │   ├── test_lineage.py        Phase 4A: parent_prompt_id fork rules
-│   └── test_experiments.py    Phase 5: run/score/retrieve experiments (provider mocked)
+│   ├── test_experiments.py    Phase 5: run/score/retrieve experiments (provider mocked)
+│   ├── test_embeddings_unit.py  Phase 6: embedding provider (no DB, no pgvector)
+│   └── test_semantic_search.py  Phase 6: semantic search (pgvector — skips w/ reason if absent)
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```

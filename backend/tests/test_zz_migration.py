@@ -1,7 +1,8 @@
 """Migration round-trip test (runs last — it rebuilds the schema).
 
-Verifies completion criterion: the database is reproducible from empty via
-Alembic, and `downgrade base` -> `upgrade head` works.
+Verifies the database is reproducible from empty via Alembic, and
+`downgrade base` -> `upgrade <target>` works. Target = `head` when pgvector is
+available, else the last pre-vector revision (see conftest).
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect
 
-from tests.conftest import BACKEND_DIR, TEST_URL
+from tests.conftest import BACKEND_DIR, TEST_URL, _target_revision
 from tests.test_database import EXPECTED_TABLES
 
 
@@ -21,8 +22,9 @@ def _cfg() -> Config:
     return cfg
 
 
-def test_downgrade_base_then_upgrade_head(pg_engine):
+def test_downgrade_base_then_upgrade(pg_engine):
     cfg = _cfg()
+    target = _target_revision()
 
     command.downgrade(cfg, "base")
     tables_after_down = set(inspect(pg_engine).get_table_names())
@@ -31,8 +33,8 @@ def test_downgrade_base_then_upgrade_head(pg_engine):
         f"{EXPECTED_TABLES & tables_after_down}"
     )
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, target)
     tables_after_up = set(inspect(pg_engine).get_table_names())
     assert EXPECTED_TABLES <= tables_after_up, (
-        f"upgrade head missing tables: {EXPECTED_TABLES - tables_after_up}"
+        f"upgrade {target} missing tables: {EXPECTED_TABLES - tables_after_up}"
     )

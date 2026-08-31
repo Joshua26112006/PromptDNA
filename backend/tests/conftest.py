@@ -48,11 +48,42 @@ def _resolve_test_url() -> str | None:
 TEST_URL = _resolve_test_url()
 
 
-def _apply_migrations(url: str) -> None:
-    """Recreate an empty schema and run Alembic to HEAD.
+# Phase 6: the `vector` extension is required for the embedding column and
+# semantic search. Where it is unavailable, migrations stop before 0002 and the
+# pgvector-dependent test modules skip with a reason (they never run against a
+# different engine). Detected once, at import, against the test database.
+def _detect_pgvector(url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        eng = create_engine(url, future=True)
+        with eng.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+            ).first()
+        eng.dispose()
+        return row is not None
+    except Exception:
+        return False
 
-    This is what exercises completion criterion #3 ("migration runs
-    successfully from an empty database").
+
+PGVECTOR_AVAILABLE = _detect_pgvector(TEST_URL)
+
+# Tell the app whether to map the versions.embedding columns. Must be set
+# before any `app.*` import (conftest is imported first by pytest).
+os.environ.setdefault("PGVECTOR_ENABLED", "true" if PGVECTOR_AVAILABLE else "false")
+
+
+def _target_revision() -> str:
+    """`head` when pgvector is available, else the last pre-vector revision."""
+
+    return "head" if PGVECTOR_AVAILABLE else "0001_initial_schema"
+
+
+def _apply_migrations(url: str) -> None:
+    """Recreate an empty schema and run Alembic to the target revision.
+
+    Exercises "migration runs successfully from an empty database".
     """
 
     from alembic import command
@@ -67,7 +98,7 @@ def _apply_migrations(url: str) -> None:
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     cfg.set_main_option("sqlalchemy.url", url)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, _target_revision())
 
 
 @pytest.fixture(scope="session")

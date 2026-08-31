@@ -54,6 +54,21 @@ INITIAL_CHANGE_SUMMARY = "Initial version."
 VERSION_NUMBER_MAX_RETRIES = 5
 
 
+def _try_autoembed_version(db: Session, version_id: uuid.UUID) -> None:
+    """Best-effort embed after a version is committed. No-op unless
+    EMBEDDING_AUTOGENERATE is on; never raises (see services/embedding.py)."""
+
+    from app.services.embedding import try_autogenerate
+
+    try_autogenerate(db, version_id)
+
+
+def _try_autoembed(db: Session, prompt_id: uuid.UUID) -> None:
+    v = repo.list_versions_for_prompt(db, prompt_id)
+    if v:
+        _try_autoembed_version(db, v[0].version_id)
+
+
 # --------------------------------------------------------------------------- #
 # Authorization helpers                                                      #
 # --------------------------------------------------------------------------- #
@@ -154,6 +169,8 @@ def create_prompt_with_initial_version(
         logger.exception("create_prompt_with_initial_version failed; rolled back")
         raise
 
+    _try_autoembed(db, prompt.prompt_id)
+
     created = repo.get_prompt_by_id(db, prompt.prompt_id)
     assert created is not None  # just committed
     return _to_prompt_read(created)
@@ -205,6 +222,7 @@ def create_version(
             logger.exception("create_version failed; rolled back")
             raise
         db.refresh(version)
+        _try_autoembed_version(db, version.version_id)
         return VersionRead.model_validate(version)
 
     raise AssertionError("unreachable")  # pragma: no cover

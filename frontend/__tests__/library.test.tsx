@@ -115,7 +115,7 @@ describe("Prompt Library", () => {
     const user = userEvent.setup();
     render(<PromptLibraryPage />);
     await waitFor(() => expect(listPrompts).toHaveBeenCalled());
-    await user.type(screen.getByLabelText(/search/i), "optimizer");
+    await user.type(screen.getByRole("searchbox"), "optimizer");
     await user.click(screen.getByRole("button", { name: /^search$/i }));
     await waitFor(() =>
       expect(listPrompts).toHaveBeenLastCalledWith(

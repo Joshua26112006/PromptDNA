@@ -105,6 +105,26 @@ export interface ExperimentRunPayload {
   notes?: string | null;
 }
 
+// --- semantic search (Phase 6) ------------------------------------------------
+
+export interface SemanticSearchResult {
+  prompt_id: string;
+  version_id: string;
+  prompt_title: string;
+  version_number: number;
+  content_preview: string;
+  /** 1 - cosine_distance; higher = more semantically similar */
+  similarity: number;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface SemanticSearchResponse {
+  query: string;
+  count: number;
+  results: SemanticSearchResult[];
+}
+
 // --- request payloads ---------------------------------------------------------
 
 export interface PromptCreatePayload {

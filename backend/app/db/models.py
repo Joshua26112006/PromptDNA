@@ -34,13 +34,25 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
+from app.core.config import get_settings
 from app.db.base import Base
 
 # Allowed values for experiments.status. A CHECK constraint (rather than a
 # native PostgreSQL ENUM type) is used so the set can evolve with an ordinary
 # migration — see docs/decisions.md, Decision 15.
 EXPERIMENT_STATUSES = ("PENDING", "SUCCESS", "FAILED")
+
+# Fixed vector dimension for versions.embedding (Phase 6). Set at migration
+# 0002. 1536 = OpenAI text-embedding-3-small; the mock provider matches it.
+# Changing this requires a new migration and re-embedding all versions.
+EMBEDDING_DIMENSION = 1536
+
+# The versions.embedding / embedding_model columns (and their HNSW index) exist
+# only where pgvector + migration 0002 are present. Gated so the rest of the
+# schema is usable on a plain PostgreSQL. See docs/decisions.md.
+PGVECTOR_ENABLED = get_settings().pgvector_enabled
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -164,6 +176,19 @@ class Version(Base):
         nullable=False,
     )
     created_at: Mapped[datetime.datetime] = _created_at()
+
+    # -- Phase 6: derived semantic embedding of `content` -----------------
+    # Present only where pgvector + migration 0002 are installed
+    # (PGVECTOR_ENABLED). Nullable: PostgreSQL version data is authoritative,
+    # the embedding is derived and recoverable. `deferred`: never in a default
+    # `SELECT versions.*` — the search query names the column explicitly.
+    if PGVECTOR_ENABLED:  # noqa: SIM108 - conditional column mapping
+        embedding: Mapped[list[float] | None] = mapped_column(
+            Vector(EMBEDDING_DIMENSION), nullable=True, deferred=True
+        )
+        embedding_model: Mapped[str | None] = mapped_column(
+            String(100), nullable=True, deferred=True
+        )
 
     __table_args__ = (
         UniqueConstraint("prompt_id", "version_number"),
@@ -311,6 +336,16 @@ class PromptCollection(Base):
 Index("ix_prompts_user_id", Prompt.user_id)
 Index("ix_prompts_parent_prompt_id", Prompt.parent_prompt_id)
 Index("ix_versions_created_by", Version.created_by)
+if PGVECTOR_ENABLED:
+    # Phase 6: HNSW approximate-nearest-neighbour index over the embedding,
+    # using the cosine-distance operator class (matches the `<=>` operator the
+    # semantic search query uses). Built by migration 0002.
+    Index(
+        "ix_versions_embedding_hnsw",
+        Version.embedding,
+        postgresql_using="hnsw",
+        postgresql_ops={"embedding": "vector_cosine_ops"},
+    )
 Index("ix_experiments_version_id", Experiment.version_id)
 Index("ix_experiments_model_id", Experiment.model_id)
 Index("ix_experiments_executed_at", Experiment.executed_at)

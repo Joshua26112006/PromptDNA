@@ -17,3 +17,8 @@ python-multipart>=0.0.9,<1       # OAuth2 login form parsing
 
 # Experiments (Phase 5): HTTP client for the AI model provider integrations.
 httpx>=0.27,<0.29
+
+# Semantic search (Phase 6): pgvector column type + query adapters for SQLAlchemy.
+# Pure-Python; the `vector` PostgreSQL extension must be installed in the DB
+# (pgvector/pgvector image, Neon, or `CREATE EXTENSION vector`).
+pgvector>=0.3,<0.5

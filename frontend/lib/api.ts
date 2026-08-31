@@ -20,6 +20,7 @@ import type {
   PromptCreatePayload,
   PromptListResponse,
   PromptMetadataPayload,
+  SemanticSearchResponse,
   User,
   Version,
   VersionCreatePayload,
@@ -289,4 +290,17 @@ export async function updateExperimentScore(
     method: "PATCH",
     body: payload,
   });
+}
+
+// --- semantic search (Phase 6) ---------------------------------
+
+export async function semanticSearch(
+  query: string,
+  opts: { limit?: number; isPublic?: boolean; owner?: boolean } = {},
+): Promise<SemanticSearchResponse> {
+  const qs = new URLSearchParams({ query });
+  qs.set("limit", String(opts.limit ?? 10));
+  if (opts.isPublic !== undefined) qs.set("is_public", String(opts.isPublic));
+  if (opts.owner) qs.set("owner", "true");
+  return request<SemanticSearchResponse>(`/api/v1/search/semantic?${qs.toString()}`);
 }

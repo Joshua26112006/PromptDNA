@@ -86,6 +86,7 @@ python -m venv .venv
 - Prompts/versions: `/api/v1/prompts…` · Experiments: `/api/v1/prompts/{id}/versions/{vid}/experiments`, `/api/v1/experiments/{id}`, `/api/v1/models`
 - API (v1): send `Authorization: Bearer <token>` · docs: <http://localhost:8000/docs>
 - Experiments (Phase 5): set `OPENAI_API_KEY` for real OpenAI execution; without it the built-in `mock` provider (`ENABLE_MOCK_PROVIDER=true`) runs models whose `provider` is `mock`.
+- Semantic search (Phase 6): needs a PostgreSQL with the `vector` extension (`pgvector/pgvector` image, Neon, or `CREATE EXTENSION vector`) + `alembic upgrade head` (migration `0002`). Set `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` for real embeddings, else the deterministic `mock` embedder is used. On a PostgreSQL **without** pgvector, set `PGVECTOR_ENABLED=false` — the API runs, semantic endpoints return `503`, lexical search is unaffected.
 - Tests (need a real PostgreSQL test DB):
   `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
 - Full endpoint reference: [`docs/api.md`](docs/api.md)
@@ -184,8 +185,23 @@ call. `GET /api/v1/prompts/{id}/experiments`, `GET .../versions/{vid}/experiment
 experiment history + owner-only "Run Experiment" on `/prompts/[id]`.
 **No schema change, no migration.** Neo4j / pgvector / semantic search untouched.
 
+### Phase 6 — pgvector + embeddings + semantic search ✅
+`versions.embedding vector(1536)` + `embedding_model` (migration `0002`, HNSW
+index `vector_cosine_ops`) — **only new columns on `versions`, nothing else
+changed**. `EmbeddingProvider` abstraction (`app/embeddings/`: deterministic
+`MockEmbeddingProvider` for dev/tests, real `OpenAIEmbeddingProvider`,
+`text-embedding-3-small` → 1536-d). `GET /api/v1/search/semantic` — embeds the
+query, returns nearest versions by **cosine similarity**, with the
+owner-or-public visibility filter **inside the SQL query** (private prompts are
+never scored). `POST /api/v1/versions/{id}/embedding` (owner-only regenerate),
+`GET .../embedding` (status). `scripts/generate_embeddings.py` backfill.
+Lexical search unchanged — two distinct modes ("Search by text" / "Semantic
+Search") in the Prompt Library UI. `PGVECTOR_ENABLED=false` degrades cleanly
+(embedding columns unmapped, semantic endpoints → `503`). Embedding is derived
+data; a provider failure never deletes/changes the version.
+
 ### Not started (by design)
 Prompt deletion, version editing, recursive/graph lineage APIs, refresh tokens /
 token revocation, roles / RBAC / SSO, rate limiting, automatic AI scoring,
-pgvector / embeddings / semantic search, Neo4j integration, tags/collections UI,
-dashboard, analytics UI, production deployment.
+hybrid ranking, Neo4j integration, tags/collections UI, dashboard, analytics UI,
+production deployment.

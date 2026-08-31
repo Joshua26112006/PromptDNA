@@ -718,9 +718,105 @@ should add rate limits and cost controls (documented as future hardening).
 
 ---
 
+# Phase 6 decisions (pgvector + embeddings + semantic search)
+
+## Decision 54 — Embedding lives on `versions`, dimension 1536, cosine, HNSW
+
+**Decision:** `versions.embedding vector(1536)` + `versions.embedding_model`
+(migration `0002`, `CREATE EXTENSION vector`). Dimension **1536** = OpenAI
+`text-embedding-3-small` (the intended real provider); the mock provider is
+configured to 1536 too, so switching to OpenAI needs no migration. Distance =
+**cosine** (`embedding <=> :qvec`); index = **HNSW** with `vector_cosine_ops`.
+Similarity returned = `1 - cosine_distance`.
+
+**Reason:** Each *version's* text has its own meaning, so the embedding belongs
+to `versions.version_id` (not `prompts`). Cosine is the standard metric for
+sentence/paragraph embeddings and matches `text-embedding-3-small`. HNSW is
+pgvector's approximate-NN index — sub-linear query time, good recall, and it
+supports the cosine op class; IVFFlat needs a training step and a populated
+table. Only two nullable columns added — no existing column/key/FK/relationship
+changed.
+
+**Trade-off / future work:** changing the embedding model or dimension later
+means a new migration + re-embedding every version. `embedding_model` records
+which model produced each vector so stale ones can be found.
+
+---
+
+## Decision 55 — Embedding is derived data; PostgreSQL is authoritative
+
+**Decision:** `versions.content` is never touched when an embedding is
+generated. Embedding generation is a separate `UPDATE`. A provider failure
+leaves the version exactly as it was, with a NULL (or previous) embedding, and
+is retryable via `POST /versions/{id}/embedding` or
+`scripts/generate_embeddings.py`. Best-effort synchronous embed after version
+create (`EMBEDDING_AUTOGENERATE`, off by default) never raises.
+
+**Reason:** The relational data is the product; the embedding is a rebuildable
+index over it. Losing an embedding must never risk the prompt/version.
+
+---
+
+## Decision 56 — Authorization filtering is inside the vector query
+
+**Decision:** `repositories/version.semantic_search` builds
+`WHERE embedding IS NOT NULL AND (prompts.user_id = :viewer OR
+prompts.is_public) [AND …] ORDER BY embedding <=> :qvec LIMIT :n`. Private
+prompts of other users are **never scored** — not retrieved-then-filtered.
+
+**Reason:** Retrieve-all-then-filter would (a) leak via timing/counts and (b)
+waste the index. The visibility predicate is a plain `WHERE` clause the planner
+combines with the HNSW scan.
+
+---
+
+## Decision 57 — Embedding provider abstraction; one active provider per deployment
+
+**Decision:** `EmbeddingProvider` (`dimension`, `is_configured()`,
+`embed(text, timeout_s)`, typed `EmbeddingError`). `MockEmbeddingProvider` is a
+deterministic normalised bag-of-hashed-tokens (a *controlled test embedding*,
+explicitly not a fake of a vendor model — related text → higher cosine, enough
+to test ranking). `OpenAIEmbeddingProvider` is the real one. Exactly one is
+active (`EMBEDDING_PROVIDER`), because every stored vector must be comparable.
+
+**Reason:** Same rationale as the LLM provider abstraction (Decision 46):
+provider details out of services; testable without paid APIs. Unlike LLM
+providers there is one per deployment, not one per row.
+
+---
+
+## Decision 58 — `PGVECTOR_ENABLED` gate for pgvector-less environments
+
+**Decision:** When `PGVECTOR_ENABLED=false`, the `versions.embedding` /
+`embedding_model` columns are **not mapped** on the ORM, migration `0002` is
+not applied, and the semantic-search / embedding endpoints return `503` with a
+clear "not available on this deployment — use lexical search" message. Lexical
+search and everything else are unaffected. The test harness auto-detects the
+`vector` extension and sets this flag; the pgvector-dependent tests then skip
+with a reason (never run against a different engine).
+
+**Reason:** pgvector is a real requirement of the feature, but its absence
+should not break the rest of the API. This mirrors the "provider not
+configured → 503, no fake" pattern.
+
+---
+
+## Decision 59 — Lexical and semantic search stay separate; no hybrid ranking
+
+**Decision:** Two explicit modes in the UI ("Search by text" / "Semantic
+Search") and two endpoints. No combined/hybrid ranking. Lexical search is never
+labelled "AI search".
+
+**Reason:** The spec: keep the database concepts easy to explain; don't build
+hybrid unless "genuinely simple and well justified". Keeping them separate makes
+"ILIKE on title" vs "cosine over embeddings" obvious.
+
+---
+
 ## Non-decisions (still deferred)
 
-- pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.
+- A different embedding model / dimension, and the re-embedding migration it needs.
+- Hybrid (lexical + vector) ranking; reranking; query expansion.
 - Neo4j integration and PostgreSQL→graph sync mechanism; recursive lineage / ancestor-descendant APIs — later phase.
 - Refresh tokens, server-side token revocation / blacklist, `/auth/logout` — later phase.
 - Roles / permissions / RBAC, SSO, shared-write / prompt collaborators — later phase.

@@ -358,3 +358,77 @@ title/description — so a run is reproducible.
 Explicitly **out of scope** for Phase 5: pgvector / embeddings / semantic
 search, Neo4j, automatic scoring, analytics, rate limiting, retries beyond a
 bounded/none policy.
+
+## Phase 6 scope (done) — pgvector + embeddings + semantic search
+
+```
+Next.js  (Prompt Library: "Search by text" | "Semantic Search")
+   ▼
+FastAPI  /api/v1/search/semantic ,  /api/v1/versions/{id}/embedding
+   ▼
+Semantic Search Service        app/services/{search,embedding}.py
+   ▼
+Embedding Provider             app/embeddings/  (EmbeddingProvider)
+   ├── MockEmbeddingProvider    deterministic bag-of-hashed-tokens, dim 1536 (dev/tests)
+   └── OpenAIEmbeddingProvider  text-embedding-3-small -> 1536-d (needs OPENAI_API_KEY)
+   ▼
+PostgreSQL + pgvector          versions.embedding  vector(1536)   (migration 0002)
+   ▼
+vector similarity search       ORDER BY embedding <=> :query   (cosine), HNSW index
+```
+
+**The relational database stays authoritative. The embedding is derived from
+`Version.content`:**
+
+```
+Version
+  ├── content          (immutable, authoritative)
+  └── embedding         (derived, nullable, recoverable — pgvector)
+      embedding_model   (which model produced it)
+```
+
+- **Embedding belongs to `versions`** (each version's text has its own meaning),
+  associated by `versions.version_id`. `versions.content` is never modified when
+  an embedding is generated.
+- **Vector dimension = 1536** — chosen to match OpenAI `text-embedding-3-small`
+  (the intended real provider). The mock provider is configured to the same
+  1536, so switching to OpenAI needs no migration. The column dimension is fixed
+  by migration `0002`; changing the model/dimension later needs a new migration
+  + re-embed (documented as future work).
+- **Distance metric = cosine.** Query: `1 - (embedding <=> :qvec)` as
+  `similarity`, `ORDER BY embedding <=> :qvec`. HNSW index with
+  `vector_cosine_ops` (`ix_versions_embedding_hnsw`). "similarity" is a
+  **semantic-similarity** score (meaning closeness) — *not* an experiment score
+  (model-run quality); they are different concepts.
+- **Provider abstraction** (`app/embeddings/base.py`): `EmbeddingProvider` with
+  `dimension`, `is_configured()`, `embed(text, timeout_s) -> list[float]`,
+  typed `EmbeddingError` subclasses (`NotConfigured`, `Timeout`, `RequestError`,
+  `DimensionMismatch`). One active provider per deployment (`EMBEDDING_PROVIDER`).
+- **Endpoints** (auth required): `GET /api/v1/search/semantic` (`query`,
+  `limit`, `is_public`, `owner`); `POST /api/v1/versions/{id}/embedding`
+  (owner-only (re)generate — it can cost money); `GET /api/v1/versions/{id}/embedding`
+  (status). Raw vectors are **never** returned.
+- **Authorization is part of the SQL query** — `WHERE embedding IS NOT NULL AND
+  (prompts.user_id = :viewer OR prompts.is_public)` — so another user's private
+  prompts are never even scored, let alone returned. Not
+  retrieve-all-then-filter.
+- **Embedding lifecycle**: best-effort synchronous embed after a version is
+  committed (`EMBEDDING_AUTOGENERATE`, off by default; needs pgvector). On
+  failure the version is untouched and the embedding stays NULL — recoverable
+  via the endpoint or `scripts/generate_embeddings.py`. Immutable versions mean
+  an embedding is generated once, not on every view.
+- **Lexical search is unchanged** (`GET /api/v1/prompts?search=` — `ILIKE` on
+  title). Two clearly-labelled modes; lexical search is never called "AI search".
+- **Failure / availability**: missing key → `503`; provider timeout/HTTP/
+  malformed → `503` with a safe message (no keys, no raw payloads); empty query
+  → `422`/`400`; dimension mismatch → typed error. On a PostgreSQL without
+  pgvector, `PGVECTOR_ENABLED=false` leaves the embedding columns unmapped and
+  the semantic endpoints return `503` — the rest of the API is unaffected.
+- **Schema**: migration `0002` adds only `versions.embedding` +
+  `versions.embedding_model` + the HNSW index + `CREATE EXTENSION vector`. No
+  existing column, key, foreign key, relationship, or index is changed.
+- **Neo4j remains untouched.**
+
+Explicitly **out of scope** for Phase 6: Neo4j / graph sync / graph queries,
+hybrid (lexical+vector) ranking, recommendations, prompt-optimization,
+analytics.

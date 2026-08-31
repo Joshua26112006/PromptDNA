@@ -75,11 +75,25 @@ class Settings(BaseSettings):
     neo4j_username: str | None = None
     neo4j_password: str | None = None
 
-    # -- Embedding provider abstraction --------------------------------
-    # Provider name + credential only. The vector dimension is deliberately
-    # NOT configured here; it is derived from the selected model later.
-    embedding_provider: str | None = None
-    embedding_api_key: str | None = None
+    # -- Embeddings / semantic search (Phase 6) --------------------
+    # Whether this deployment's PostgreSQL has the `vector` extension +
+    # migration 0002. When False, the versions.embedding columns are not mapped
+    # and semantic-search endpoints return a clear "not available" error —
+    # everything else is unaffected. Set False only where pgvector is absent.
+    pgvector_enabled: bool = True
+    # Active embedding provider: "mock" (deterministic, dev/tests) or "openai".
+    embedding_provider: str = "mock"
+    embedding_api_key: str | None = None  # kept for back-compat; openai uses OPENAI_API_KEY
+    # Vector dimension. MUST match the provider's output AND the
+    # versions.embedding column fixed by migration 0002. 1536 = OpenAI
+    # text-embedding-3-small; the mock provider is configured to match, so
+    # switching to real OpenAI needs no migration.
+    embedding_dimension: int = 1536
+    embedding_model_name: str = "text-embedding-3-small"
+    embedding_provider_timeout_s: float = 30.0
+    # Best-effort embed on version create. Off by default (requires pgvector +
+    # migration 0002); enable on a pgvector-capable deployment.
+    embedding_autogenerate: bool = False
 
     @field_validator("cors_origins")
     @classmethod

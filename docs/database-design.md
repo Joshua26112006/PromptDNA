@@ -102,10 +102,32 @@ Indexes: `ix_prompts_user_id`, `ix_prompts_parent_prompt_id`.
 | `version_id` | uuid | no | **PK** |
 | `prompt_id` | uuid | no | **FK** → `prompts.prompt_id` **ON DELETE CASCADE** |
 | `version_number` | integer | no | `CHECK (version_number > 0)` (`ck_versions_version_number_positive`) |
-| `content` | text | no | |
+| `content` | text | no | authoritative prompt text |
 | `change_summary` | text | yes | |
 | `created_by` | uuid | no | **FK** → `users.user_id` **ON DELETE RESTRICT** |
 | `created_at` | timestamptz | no | `DEFAULT now()` |
+| `embedding` | `vector(1536)` | yes | **Phase 6, migration `0002`.** Derived semantic embedding of `content` (pgvector). NULL = not yet embedded. |
+| `embedding_model` | varchar(100) | yes | **Phase 6.** Which embedding model produced `embedding` (for staleness / re-embedding). |
+
+**Phase 6 — embedding is derived data, not a schema redesign.** Migration
+`0002_pgvector_embeddings` runs `CREATE EXTENSION IF NOT EXISTS vector` and adds
+**only** the two nullable columns above plus an HNSW index. No existing column,
+key, foreign key, relationship, or index is changed.
+
+```
+Version
+  ├── content    (immutable, authoritative — the DB is the source of truth)
+  └── embedding  (derived from content; nullable; regenerable)
+```
+
+Dimension **1536** = OpenAI `text-embedding-3-small` (the mock provider matches
+it). Fixed at migration time — a different model/dimension later needs a new
+migration + full re-embed. Index: `ix_versions_embedding_hnsw` — HNSW,
+`vector_cosine_ops` (cosine distance, the `<=>` operator semantic search uses).
+Semantic search filters visibility (`prompts.user_id = viewer OR
+prompts.is_public`) **inside** the query. On a PostgreSQL without pgvector,
+`PGVECTOR_ENABLED=false` leaves these columns unmapped (the migration is not
+applied) and the semantic endpoints return `503`.
 
 Constraints: `UNIQUE (prompt_id, version_number)`
 (`uq_versions_prompt_id_version_number`).
