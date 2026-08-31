@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { CreateVersionForm } from "@/components/CreateVersionForm";
 import { EditMetadataForm } from "@/components/EditMetadataForm";
 import { ExperimentSection } from "@/components/ExperimentSection";
+import { GraphSection } from "@/components/GraphSection";
 import { buttonPrimary, buttonSecondary, ErrorBox, formatDate, Spinner } from "@/components/ui";
 import { VersionHistory } from "@/components/VersionHistory";
 import { VersionPanel } from "@/components/VersionPanel";
@@ -245,6 +246,8 @@ export default function PromptDetailPage() {
         }
         currentVersionNumber={latestNumber}
       />
+
+      <GraphSection promptId={prompt.prompt_id} />
 
       {!isOwner && (
         <p className="text-xs text-neutral-500">

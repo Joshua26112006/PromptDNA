@@ -432,3 +432,108 @@ Version
 Explicitly **out of scope** for Phase 6: Neo4j / graph sync / graph queries,
 hybrid (lexical+vector) ranking, recommendations, prompt-optimization,
 analytics.
+
+## Phase 7 scope (done) — Neo4j graph projection + prompt relationships
+
+```
+                          PromptDNA
+                              │
+             ┌────────────────┼────────────────┐
+             ▼                ▼                ▼
+        PostgreSQL         pgvector          Neo4j
+        structured         semantic          graph
+          truth             search          traversal
+             │  (authoritative) │                │  (derived projection)
+             └────────┬─────────┴────────┬───────┘
+                      ▼                  ▼
+                 FastAPI            Next.js UI
+```
+
+- **"Where is the authoritative data?"** → PostgreSQL.
+  **"Which prompts are semantically similar?"** → pgvector.
+  **"How are prompts explicitly related?"** → Neo4j.
+- **PostgreSQL is the system of record; Neo4j is a one-way derived projection**
+  (`PostgreSQL → Neo4j`, never `↔`). If the two disagree, PostgreSQL wins — the
+  graph API even re-reads every node's `title` from PostgreSQL and drops any
+  Neo4j node PostgreSQL doesn't have.
+
+### Why Neo4j when PostgreSQL already stores the relationships
+
+PostgreSQL (`prompts.parent_prompt_id`, a self-referencing FK with
+`ON DELETE SET NULL`) is optimal for authoritative storage and structured
+queries. Relationship-centric questions — *what came from this prompt? what is
+its ancestry? which prompts depend on it? what is connected across several
+hops?* — are naturally expressed as Cypher graph traversals (variable-length
+`-[:DERIVED_FROM|FORKED_FROM*1..N]->` patterns) rather than recursive SQL. The
+projection lets those traversals be written directly against a graph.
+
+### Node & relationship model (the ONLY things in Neo4j)
+
+```
+(:Prompt { prompt_id, title })          -- prompt_id == PostgreSQL prompts.prompt_id (identity bridge)
+
+(:Prompt)-[:DERIVED_FROM]->(:Prompt)     -- child was created as a derivation of parent
+(:Prompt)-[:FORKED_FROM]->(:Prompt)      -- child was forked from parent
+(:Prompt)-[:DEPENDS_ON]->(:Prompt)       -- explicit prompt-to-prompt dependency
+```
+
+No `User` / `Version` / `Model` / `Experiment` / `Tag` / `Collection` nodes. No
+`HAS_VERSION` / `USES_MODEL` / `HAS_TAG` / `OWNS` / `IN_COLLECTION` / … edges.
+The graph is **not** a mirror of PostgreSQL — only prompt-to-prompt links.
+
+### Authoritative source for each relationship
+
+| Relationship | PostgreSQL source | Projected by sync? |
+|---|---|---|
+| `DERIVED_FROM` | `prompts.parent_prompt_id` (the only relationship column in the locked schema) | **yes** |
+| `FORKED_FROM` | *(none — the schema doesn't record a fork flag)* | **no** — modelled, but nothing to project |
+| `DEPENDS_ON` | *(none — no dependency column/table)* | **no** — modelled, but nothing to project |
+
+`FORKED_FROM` and `DEPENDS_ON` are first-class in the graph model and fully
+supported by the service/traversal layer; the **projection** creates none
+because the locked relational schema has no authoritative source for them
+(relationships are never inferred from text or AI). Adding one would require a
+schema change, which Phase 7 does not do.
+
+### Projection & consistency
+
+```
+1. write authoritative data to PostgreSQL
+2. COMMIT PostgreSQL
+3. best-effort project to Neo4j  (MERGE node, MERGE DERIVED_FROM edge)
+```
+
+Step 3 runs after `create_prompt` / `update_prompt_metadata` commit, and is
+also done in bulk by `scripts/sync_neo4j.py`. Every write is an idempotent
+`MERGE` — re-running creates no duplicate nodes or relationships.
+`app/main.py`'s lifespan runs an idempotent `init_schema()` (unique constraint
+on `Prompt.prompt_id`) — it never deletes data. **If Neo4j is unavailable, the
+PostgreSQL write is not rolled back** (eventual consistency; reconcile later
+with `sync_neo4j.py`). No distributed transaction, no two-phase commit.
+Reconciliation (`sync_neo4j.py --prune`) removes graph nodes whose `prompt_id`
+is no longer in PostgreSQL via scoped single-node `DETACH DELETE` — never
+`MATCH (n) DETACH DELETE n`.
+
+### Graph API + authorization
+
+`GET /api/v1/graph/prompts/{prompt_id}/{ancestors|descendants|dependencies|related}`
+(auth required). All Cypher is in `app/graph/service.py` — never in routes.
+**Neo4j must not bypass PostgreSQL authorization:** every request (1) verifies
+the caller may view the subject prompt in PostgreSQL (`404` otherwise), then
+(2) filters every returned node through PostgreSQL visibility (owner or
+`is_public`) — a private prompt the caller can't see is dropped even if the
+graph connects to it. Public identifiers are always PostgreSQL `prompt_id`;
+Neo4j internal ids / credentials / driver objects are never exposed. There is no
+`GET /graph/all`. `NEO4J_ENABLED=false` → `503`.
+
+### Frontend
+
+`/prompts/[prompt_id]` gains a **"Prompt Relationships (Knowledge Graph)"**
+section: an ancestry list + directly-connected prompts (relationship type,
+direction, depth), each linking to the prompt. It states plainly that this is
+distinct from semantic search. On `503`/error it shows "Graph relationships
+unavailable" and never breaks the page.
+
+Explicitly **out of scope** for Phase 7: any non-Prompt node, any other
+relationship type, hybrid graph+vector ranking, AI-generated relationships /
+GraphRAG, recommendations, Kafka/Redis/Celery/event bus, another database.

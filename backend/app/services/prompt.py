@@ -63,6 +63,19 @@ def _try_autoembed_version(db: Session, version_id: uuid.UUID) -> None:
     try_autogenerate(db, version_id)
 
 
+def _project_to_graph(prompt: Prompt) -> None:
+    """Best-effort Neo4j projection AFTER the PostgreSQL commit. No-op unless
+    NEO4J_ENABLED; never raises — PostgreSQL is authoritative and is never
+    rolled back for Neo4j (eventual consistency; reconcile via
+    scripts/sync_neo4j.py)."""
+
+    from app.services.graph import project_prompt_after_commit
+
+    project_prompt_after_commit(
+        prompt.prompt_id, prompt.title, prompt.parent_prompt_id
+    )
+
+
 def _try_autoembed(db: Session, prompt_id: uuid.UUID) -> None:
     v = repo.list_versions_for_prompt(db, prompt_id)
     if v:
@@ -173,6 +186,7 @@ def create_prompt_with_initial_version(
 
     created = repo.get_prompt_by_id(db, prompt.prompt_id)
     assert created is not None  # just committed
+    _project_to_graph(created)
     return _to_prompt_read(created)
 
 
@@ -255,6 +269,7 @@ def update_prompt_metadata(
 
     refreshed = repo.get_prompt_by_id(db, prompt_id)
     assert refreshed is not None
+    _project_to_graph(refreshed)  # e.g. title change -> update the node
     return _to_prompt_read(refreshed)
 
 

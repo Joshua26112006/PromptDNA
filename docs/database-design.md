@@ -359,3 +359,44 @@ are claimed; meaningful benchmarking needs a bulk-loaded dataset.
 | Seed data | `backend/app/db/seed.py` |
 | Schema tests | `backend/tests/test_database.py`, `test_seed.py`, `test_zz_migration.py` |
 | Demonstration SQL | `database/examples.sql` |
+
+## Neo4j graph projection (Phase 7) — no schema change
+
+The final PromptDNA architecture answers three different questions with three
+technologies:
+
+| Question | Answered by |
+|---|---|
+| **Where is the authoritative data stored?** | **PostgreSQL** (this document — the system of record for all 7 entities + 2 junctions) |
+| **Which prompts are semantically similar?** | **pgvector**, inside PostgreSQL (`versions.embedding`, cosine + HNSW) |
+| **How are prompts explicitly related?** | **Neo4j**, a derived projection |
+
+Phase 7 makes **no change to the relational schema** — no table, column, key,
+constraint, index, or delete rule is added or altered, and **no Alembic
+migration** is created.
+
+### What is projected
+
+```
+PostgreSQL (authoritative)                    Neo4j (derived projection)
+────────────────────────────                  ──────────────────────────
+prompts.prompt_id, prompts.title      ──►     (:Prompt { prompt_id, title })
+prompts.parent_prompt_id  (self-FK)   ──►     (child:Prompt)-[:DERIVED_FROM]->(parent:Prompt)
+```
+
+`prompts.parent_prompt_id` — the self-referencing FK with `ON DELETE SET NULL`,
+already documented above — is the **only** authoritative relationship field, and
+it is projected as `DERIVED_FROM`. The graph model also defines `FORKED_FROM`
+and `DEPENDS_ON`, but the locked schema has no column for either, so the
+projection creates none (relationships are never inferred from text/AI). See
+`architecture.md` → "Phase 7 scope" and `decisions.md`.
+
+### Direction of truth
+
+`PostgreSQL → Neo4j` only (never `↔`). Neo4j is never authoritative for prompt
+data. If the two disagree, PostgreSQL wins — the graph API re-reads each node's
+`title` from PostgreSQL and omits any node PostgreSQL does not have. PostgreSQL
+alone decides `CASCADE` / `SET NULL` / `RESTRICT`; Neo4j only reflects the
+resulting state (via `scripts/sync_neo4j.py`, incl. `--prune` reconciliation).
+Consistency is **eventual**: the projection runs after the PostgreSQL commit and
+a Neo4j outage never rolls PostgreSQL back.

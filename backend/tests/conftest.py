@@ -74,6 +74,39 @@ PGVECTOR_AVAILABLE = _detect_pgvector(TEST_URL)
 os.environ.setdefault("PGVECTOR_ENABLED", "true" if PGVECTOR_AVAILABLE else "false")
 
 
+# Phase 7: Neo4j graph projection. Detected once against the docker-compose
+# neo4j service. When unreachable, the graph test module skips with a reason
+# and NEO4J_ENABLED stays false (graph endpoints then answer 503).
+NEO4J_URI = os.environ.get("PROMPTDNA_TEST_NEO4J_URI", "bolt://127.0.0.1:7687")
+NEO4J_USER = os.environ.get("PROMPTDNA_TEST_NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("PROMPTDNA_TEST_NEO4J_PASSWORD", "promptdna_dev")
+NEO4J_DATABASE = os.environ.get("PROMPTDNA_TEST_NEO4J_DATABASE", "neo4j")
+
+
+def _detect_neo4j() -> bool:
+    try:
+        from neo4j import GraphDatabase
+
+        drv = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        drv.verify_connectivity()
+        drv.close()
+        return True
+    except Exception:
+        return False
+
+
+NEO4J_AVAILABLE = _detect_neo4j()
+
+if NEO4J_AVAILABLE:
+    os.environ.setdefault("NEO4J_ENABLED", "true")
+    os.environ.setdefault("NEO4J_URI", NEO4J_URI)
+    os.environ.setdefault("NEO4J_USERNAME", NEO4J_USER)
+    os.environ.setdefault("NEO4J_PASSWORD", NEO4J_PASSWORD)
+    os.environ.setdefault("NEO4J_DATABASE", NEO4J_DATABASE)
+else:
+    os.environ.setdefault("NEO4J_ENABLED", "false")
+
+
 def _target_revision() -> str:
     """`head` when pgvector is available, else the last pre-vector revision."""
 
@@ -270,3 +303,26 @@ def user_a(client) -> AuthUser:
 @pytest.fixture
 def user_b(client) -> AuthUser:
     return register_and_login(client, name="User B")
+
+
+# --------------------------------------------------------------------------- #
+# Phase 7 — Neo4j graph fixtures                                              #
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def graph_clean():
+    """Give each graph test an empty :Prompt subgraph.
+
+    This clears only ``:Prompt`` nodes (test isolation) — it is NOT the sync
+    strategy. Run graph tests against a disposable Neo4j.
+    """
+
+    from app.graph.client import close_driver, get_database, get_driver
+
+    def _wipe():
+        with get_driver().session(database=get_database()) as s:
+            s.run("MATCH (p:Prompt) DETACH DELETE p")
+
+    _wipe()
+    yield
+    _wipe()
+    close_driver()

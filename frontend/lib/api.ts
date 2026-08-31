@@ -16,6 +16,8 @@ import type {
   ExperimentRunPayload,
   ListPromptsParams,
   Model,
+  GraphKind,
+  GraphResponse,
   Prompt,
   PromptCreatePayload,
   PromptListResponse,
@@ -290,6 +292,15 @@ export async function updateExperimentScore(
     method: "PATCH",
     body: payload,
   });
+}
+
+// --- knowledge graph (Phase 7) --------------------------------
+
+export async function getPromptGraph(
+  promptId: string,
+  kind: GraphKind,
+): Promise<GraphResponse> {
+  return request<GraphResponse>(`/api/v1/graph/prompts/${promptId}/${kind}`);
 }
 
 // --- semantic search (Phase 6) ---------------------------------

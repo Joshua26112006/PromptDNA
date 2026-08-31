@@ -1,9 +1,10 @@
-# PromptDNA API (Phase 4A / 4B)
+# PromptDNA API (Phases 1–7)
 
-Database-backed HTTP API over the Phase 1 PostgreSQL schema, with JWT bearer
-authentication, per-user authorization, and the core prompt + immutable-version
-management endpoints. Phase 4B added the **Prompt Library frontend** (Next.js) —
-no API changes; the frontend consumes the endpoints below through
+Database-backed HTTP API. **PostgreSQL is the system of record**; pgvector
+(inside PostgreSQL) powers semantic search; **Neo4j is a derived projection**
+for prompt-relationship graph traversal. JWT bearer auth + per-user
+authorization throughout. Phase 4B added the **Prompt Library frontend**
+(Next.js), which consumes the endpoints below through
 `frontend/lib/api.ts`.
 
 > **Semantic search is not implemented yet. The current search is lexical title
@@ -341,6 +342,61 @@ Embedding status for a version (visibility = the parent prompt's).
 without an embedding, generates + stores them, reports successes/failures. A
 dev/admin tool, not an HTTP endpoint (avoids unbounded API cost).
 
+## Knowledge graph (Phase 7)  *(auth required)*
+
+> **PostgreSQL is the system of record. Neo4j is a one-way derived projection**
+> of prompt relationships. If they disagree, PostgreSQL wins.
+>
+> pgvector answers *"which prompts have similar **meaning**?"*.
+> Neo4j answers *"how are prompts **explicitly connected**?"* — these are
+> different concepts and are never mixed.
+
+**Graph model** — the only things in Neo4j:
+`(:Prompt {prompt_id, title})` nodes (`prompt_id` = the PostgreSQL id) and the
+relationships `(:Prompt)-[:DERIVED_FROM]->(:Prompt)`,
+`(:Prompt)-[:FORKED_FROM]->(:Prompt)`, `(:Prompt)-[:DEPENDS_ON]->(:Prompt)`
+(direction: child/dependent → parent/dependency). No other node label or
+relationship type. `DERIVED_FROM` = created as a derivation of another prompt;
+`FORKED_FROM` = forked from another prompt; `DEPENDS_ON` = explicit
+prompt-to-prompt dependency.
+
+**Projection** — `prompts.parent_prompt_id` (the only authoritative relationship
+column) is projected as `DERIVED_FROM` after each PostgreSQL commit and in bulk
+by `backend/scripts/sync_neo4j.py` (idempotent `MERGE`; `--prune` removes graph
+nodes whose id is no longer in PostgreSQL). `FORKED_FROM` / `DEPENDS_ON` are
+modelled and fully supported by traversal, but the locked schema has no source
+for them, so the projection creates none. **Eventual consistency**: a Neo4j
+outage never rolls back PostgreSQL.
+
+### `GET /api/v1/graph/prompts/{prompt_id}/ancestors`  ·  `.../descendants`
+Prompts this prompt was derived/forked from (transitive, following
+`DERIVED_FROM|FORKED_FROM`), and vice-versa. `?depth=` (1–10, default 10).
+
+### `GET /api/v1/graph/prompts/{prompt_id}/dependencies`
+Prompts this prompt explicitly `DEPENDS_ON` (transitive). **Explicit dependency
+only — not semantic similarity** (that is `/api/v1/search/semantic`).
+
+### `GET /api/v1/graph/prompts/{prompt_id}/related`
+Prompts one hop away on any of the three relationships, in either direction.
+
+**Response** (`GraphResponse`): `{prompt_id, title, kind, relationships: [
+{type, direction, prompt_id, title, depth, rel_types}]}`. Public ids are always
+PostgreSQL `prompt_id`; each `title` is re-read from PostgreSQL (authoritative).
+Neo4j internal node ids, credentials, and driver objects are never exposed.
+There is **no** `GET /graph/all`.
+
+**Authorization** — Neo4j must not bypass PostgreSQL authorization:
+1. the caller must be able to **view the subject prompt** in PostgreSQL, else
+   `404` (no existence oracle);
+2. **every returned node is filtered through PostgreSQL visibility** (owner or
+   `is_public`) — a private prompt the caller cannot see is dropped from the
+   result even when the graph connects to it, and any node missing from
+   PostgreSQL is dropped.
+
+**Availability** — `NEO4J_ENABLED=false`, or Neo4j unreachable → `503`
+("The knowledge graph is not available…"). The rest of the API (lexical search,
+semantic search, experiments, …) is unaffected.
+
 ## Authorization rules (summary)
 
 | Action | Own prompt (private) | Own prompt (public) | Other's prompt (public) | Other's prompt (private) |
@@ -370,11 +426,11 @@ Uniform body `{"detail": "<safe message>"}`.
 | 409 | email already registered; or a version-number could not be allocated after retries under concurrent writes |
 | 422 | Pydantic / query / path validation (incl. rejected unknown body fields; `score` outside 0–10) |
 | 500 | unexpected server error — body is exactly `{"detail":"Internal server error"}` |
-| 503 | `/health/db` when PostgreSQL is unreachable; **or** an experiment run against a model whose provider is unregistered / has no credentials on this server (no experiment row is created) |
+| 503 | `/health/db` when PostgreSQL is unreachable; an experiment run against a model whose provider is unregistered / has no credentials (no experiment row is created); a semantic-search / embedding call when the embedding provider or pgvector is unavailable; a `/api/v1/graph/*` call when `NEO4J_ENABLED=false` or Neo4j is unreachable |
 
 Never returned to clients: SQL text, connection strings, credentials, the JWT
-secret, password hashes, **AI provider API keys**, raw provider error payloads,
-or stack traces. The app runs with `debug=False`. A failed provider call is
+secret, password hashes, **AI provider API keys**, **Neo4j credentials or
+internal node ids**, raw provider/driver error payloads, or stack traces. The app runs with `debug=False`. A failed provider call is
 recorded as a `FAILED` experiment (with a safe message), not surfaced as a 5xx.
 
 ## CORS

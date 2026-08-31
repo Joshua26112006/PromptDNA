@@ -2,12 +2,17 @@
 
 FastAPI + Python. Layered API (router → schema → service → repository →
 SQLAlchemy → PostgreSQL) with JWT authentication (Phase 3), plus the Phase 1
-data layer (models, Alembic migration, seed script).
+data layer (models, Alembic migration, seed script). Phase 7 adds a **derived,
+read-only Neo4j projection** of prompt-to-prompt relationships — PostgreSQL
+stays the system of record; the graph is rebuildable and never authoritative.
 
 ## Requirements
 
 - Python 3.11+ (developed on 3.13)
 - PostgreSQL 13+ for anything database-related (13+ ships `gen_random_uuid()`).
+- Optional: pgvector (Phase 6 semantic search) and Neo4j 5.x Community (Phase 7
+  graph projection) — both are feature-gated and off by default. See
+  `../database/docker-compose.yml` for local containers.
 
 ## Setup
 
@@ -29,6 +34,19 @@ JWT_SECRET_KEY=<strong random value>                               # REQUIRED �
 
 The API **refuses to start** if `JWT_SECRET_KEY` is unset.
 
+Phase 7 graph projection is opt-in and off by default:
+
+```
+NEO4J_ENABLED=false                       # true to enable the /api/v1/graph/* endpoints + post-commit projection
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j                       # NEO4J_USER is also accepted
+NEO4J_PASSWORD=<password>                  # database/docker-compose.yml uses neo4j / promptdna_dev
+NEO4J_DATABASE=neo4j
+```
+
+With `NEO4J_ENABLED=false` the graph endpoints return `503` and prompt writes
+are unaffected. A Neo4j outage never rolls back a PostgreSQL write.
+
 ## Run the API
 
 ```powershell
@@ -41,7 +59,8 @@ The API **refuses to start** if `JWT_SECRET_KEY` is unset.
 - `POST /api/v1/auth/register` · `POST /api/v1/auth/login` · `GET /api/v1/auth/me`
 - `POST/GET /api/v1/prompts` · `GET|PATCH /api/v1/prompts/{id}`
 - `GET|POST /api/v1/prompts/{id}/versions` · `GET /api/v1/prompts/{id}/versions/{vid}`
-- all `/prompts*` routes require `Authorization: Bearer <token>`
+- `GET /api/v1/graph/prompts/{id}/{ancestors|descendants|dependencies|related}` (Phase 7 — needs `NEO4J_ENABLED=true`, else `503`)
+- all `/prompts*` and `/graph*` routes require `Authorization: Bearer <token>`
 
 Full reference: `../docs/api.md`. Ownership comes from the authenticated user
 (the Phase 2 `X-Dev-User-ID` header was removed in Phase 3). Prompt text lives
@@ -64,6 +83,15 @@ in **versions**; existing versions are immutable — editing content means
 
 Alembic resolves the URL from `-x db_url=...`, then `alembic.ini`
 (`sqlalchemy.url`, blank by default), then `DATABASE_URL`.
+
+**Phase 7 adds no migration** — `alembic check` still reports no drift. The
+Neo4j graph is populated separately (and idempotently) from PostgreSQL:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.sync_neo4j            # MERGE a node per prompt + DERIVED_FROM edges
+.\.venv\Scripts\python.exe -m scripts.sync_neo4j --prune    # also delete nodes whose prompt is gone from PostgreSQL
+.\.venv\Scripts\python.exe -m scripts.sync_neo4j --dry-run  # report counts, write nothing
+```
 
 ## Test
 
@@ -103,10 +131,15 @@ backend/
 │   │   └── routes/
 │   │       ├── health.py      GET /health, GET /health/db
 │   │       ├── auth.py        POST /auth/register, POST /auth/login, GET /auth/me
-│   │       └── prompts.py     POST/GET /api/v1/prompts, /{id}, /{id}/versions
+│   │       ├── prompts.py     POST/GET /api/v1/prompts, /{id}, /{id}/versions
+│   │       └── graph.py       GET /api/v1/graph/prompts/{id}/{ancestors|descendants|dependencies|related} (Phase 7 — no Cypher here)
+│   ├── graph/                Phase 7 — Neo4j projection (all Cypher lives here)
+│   │   ├── client.py          lazy Bolt driver singleton; GraphUnavailable; verify_connectivity; config from env
+│   │   └── service.py         MERGE node/relationship upserts + depth-bounded traversal (DERIVED_FROM/FORKED_FROM/DEPENDS_ON only)
 │   ├── schemas/
 │   │   ├── auth.py            RegisterRequest / UserRead / TokenResponse
-│   │   └── prompt.py          PromptCreate / PromptRead / *ListResponse / VersionRead
+│   │   ├── prompt.py          PromptCreate / PromptRead / *ListResponse / VersionRead
+│   │   └── graph.py           GraphResponse / GraphRelationship (PostgreSQL prompt_id only — no Neo4j ids)
 │   ├── providers/            LLMProvider abstraction (Phase 5)
 │   │   ├── base.py            LLMProvider + typed ProviderError subclasses
 │   │   ├── mock.py            MockProvider (provider "mock" — dev/tests, deterministic)
@@ -122,7 +155,8 @@ backend/
 │   │   ├── prompt.py          create/append/patch transactions + authorization
 │   │   ├── experiment.py      run experiment (2-transaction), score, retrieval, list_models
 │   │   ├── embedding.py       (re)generate a version's embedding; status; auto-embed hook
-│   │   └── search.py          semantic search (embed query -> pgvector cosine, visibility-filtered)
+│   │   ├── search.py          semantic search (embed query -> pgvector cosine, visibility-filtered)
+│   │   └── graph.py           Phase 7 — PostgreSQL authorization + title re-read around graph traversal; post-commit projection hook
 │   ├── repositories/
 │   │   ├── user.py            get_by_id / get_by_email / add_user
 │   │   ├── prompt.py          prompt/version access; visibility predicate; version-number; update
@@ -136,8 +170,11 @@ backend/
 │       └── seed.py            deterministic, idempotent dev seed data
 ├── alembic/
 │   ├── env.py                 target_metadata = models; URL from settings/-x
-│   └── versions/0001_initial_schema.py    (UNCHANGED — no Phase 2/3 migration)
+│   └── versions/              0001_initial_schema · 0002_pgvector_embeddings (Phase 6; no Phase 7 migration)
 ├── alembic.ini
+├── scripts/
+│   ├── generate_embeddings.py   Phase 6 — batch (re)embed versions
+│   └── sync_neo4j.py            Phase 7 — idempotent PostgreSQL → Neo4j projection (--prune / --dry-run)
 ├── tests/
 │   ├── conftest.py            PostgreSQL fixtures + API client + auth helpers (savepoint-isolated)
 │   ├── test_health.py         no DB
@@ -151,7 +188,8 @@ backend/
 │   ├── test_lineage.py        Phase 4A: parent_prompt_id fork rules
 │   ├── test_experiments.py    Phase 5: run/score/retrieve experiments (provider mocked)
 │   ├── test_embeddings_unit.py  Phase 6: embedding provider (no DB, no pgvector)
-│   └── test_semantic_search.py  Phase 6: semantic search (pgvector — skips w/ reason if absent)
+│   ├── test_semantic_search.py  Phase 6: semantic search (pgvector — skips w/ reason if absent)
+│   └── test_graph.py            Phase 7: projection idempotency, traversal, authz, outage safety (Neo4j — skips w/ reason if absent)
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```

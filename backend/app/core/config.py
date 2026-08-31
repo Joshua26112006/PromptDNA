@@ -70,10 +70,15 @@ class Settings(BaseSettings):
     # Enabled by default for local dev and tests; set false to disable.
     enable_mock_provider: bool = True
 
-    # -- Neo4j: supporting graph projection (not used in Phase 0) -------
+    # -- Neo4j: supporting graph projection (Phase 7) ------------------
+    # Neo4j is a DERIVED projection of prompt relationships only. PostgreSQL is
+    # authoritative. When neo4j_enabled is False the graph endpoints return a
+    # clear "not available" response and nothing else is affected.
+    neo4j_enabled: bool = False
     neo4j_uri: str | None = None
-    neo4j_username: str | None = None
+    neo4j_username: str = "neo4j"
     neo4j_password: str | None = None
+    neo4j_database: str = "neo4j"
 
     # -- Embeddings / semantic search (Phase 6) --------------------
     # Whether this deployment's PostgreSQL has the `vector` extension +

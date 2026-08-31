@@ -87,6 +87,7 @@ python -m venv .venv
 - API (v1): send `Authorization: Bearer <token>` · docs: <http://localhost:8000/docs>
 - Experiments (Phase 5): set `OPENAI_API_KEY` for real OpenAI execution; without it the built-in `mock` provider (`ENABLE_MOCK_PROVIDER=true`) runs models whose `provider` is `mock`.
 - Semantic search (Phase 6): needs a PostgreSQL with the `vector` extension (`pgvector/pgvector` image, Neon, or `CREATE EXTENSION vector`) + `alembic upgrade head` (migration `0002`). Set `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` for real embeddings, else the deterministic `mock` embedder is used. On a PostgreSQL **without** pgvector, set `PGVECTOR_ENABLED=false` — the API runs, semantic endpoints return `503`, lexical search is unaffected.
+- Graph (Phase 7): `cd database && docker compose up -d` also starts `promptdna-neo4j`. Set `NEO4J_ENABLED=true` + `NEO4J_URI=bolt://localhost:7687` + `NEO4J_PASSWORD=…`, then `./.venv/Scripts/python.exe scripts/sync_neo4j.py` to project `prompts.parent_prompt_id` into the graph. With `NEO4J_ENABLED=false` (default) the graph endpoints return `503` and nothing else changes.
 - Tests (need a real PostgreSQL test DB):
   `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
 - Full endpoint reference: [`docs/api.md`](docs/api.md)
@@ -200,8 +201,26 @@ Search") in the Prompt Library UI. `PGVECTOR_ENABLED=false` degrades cleanly
 (embedding columns unmapped, semantic endpoints → `503`). Embedding is derived
 data; a provider failure never deletes/changes the version.
 
+### Phase 7 — Neo4j graph projection + prompt relationships ✅
+**PostgreSQL stays the system of record; Neo4j is a derived projection.**
+`(:Prompt {prompt_id, title})` nodes (same `prompt_id` as PostgreSQL) + only
+`DERIVED_FROM` / `FORKED_FROM` / `DEPENDS_ON` relationships — no other node label
+or relationship type. `app/graph/` (driver client + Cypher service, idempotent
+`MERGE` node/relationship upserts, ancestor/descendant/dependency/related
+traversals). `scripts/sync_neo4j.py` — idempotent projection of
+`prompts.parent_prompt_id → DERIVED_FROM` (`--prune` for scoped reconciliation;
+no full‑graph wipe). Best‑effort projection after the PostgreSQL commit
+(eventual consistency — a Neo4j outage never rolls back PostgreSQL).
+`GET /api/v1/graph/prompts/{id}/{ancestors,descendants,dependencies,related}` —
+**every traversal is authorized through PostgreSQL visibility**; private prompts
+of other users are filtered out and can't be reached. Prompt Detail page gains
+a "Prompt Relationships (Knowledge Graph)" section. `NEO4J_ENABLED=false`
+degrades cleanly (graph endpoints → `503`). **No PostgreSQL schema change, no
+migration.** pgvector answers *"similar meaning?"*; Neo4j answers *"explicitly
+connected how?"*.
+
 ### Not started (by design)
-Prompt deletion, version editing, recursive/graph lineage APIs, refresh tokens /
-token revocation, roles / RBAC / SSO, rate limiting, automatic AI scoring,
-hybrid ranking, Neo4j integration, tags/collections UI, dashboard, analytics UI,
-production deployment.
+Prompt deletion, version editing, refresh tokens / token revocation,
+roles / RBAC / SSO, rate limiting, automatic AI scoring, hybrid graph+vector
+ranking, AI‑generated relationships / GraphRAG, recommendation engine,
+tags/collections UI, dashboard, analytics UI, production deployment.

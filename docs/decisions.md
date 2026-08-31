@@ -813,11 +813,188 @@ hybrid unless "genuinely simple and well justified". Keeping them separate makes
 
 ---
 
+---
+
+# Phase 7 decisions (Neo4j graph projection + prompt relationships)
+
+## Decision 60 — Neo4j is a derived, read-only projection; PostgreSQL is the system of record
+
+**Decision:** PostgreSQL holds all authoritative state. Neo4j is a one-way
+projection built *from* PostgreSQL and never written to by users. The graph API
+re-reads prompt titles from PostgreSQL and drops any node that is not present in
+PostgreSQL. If PostgreSQL and Neo4j disagree, **PostgreSQL wins**. No
+distributed transaction, no two-phase commit — the two stores are reconciled by
+an explicit projection step, not a shared commit.
+
+**Reason:** The graded contribution is the relational design; adding a graph
+store must not create a second source of truth or a consistency protocol to
+defend. A derived projection can always be rebuilt from `scripts/sync_neo4j.py`
+and can lag or be wiped without data loss.
+
+---
+
+## Decision 61 — Only `(:Prompt {prompt_id, title})` nodes in Neo4j
+
+**Decision:** The graph contains exactly one label, `:Prompt`, with two
+properties: `prompt_id` (the PostgreSQL UUID, as a string — the identity bridge)
+and `title` (a denormalised convenience copy, treated as stale by readers). No
+`User`, `Version`, `Model`, `Experiment`, `Tag`, or `Collection` nodes. A
+`CONSTRAINT prompt_id_unique` (uniqueness + index) is the only schema object.
+
+**Reason:** The graph exists to answer "which prompts are explicitly connected
+to which", nothing else. Every other entity is fully served by PostgreSQL, and
+mirroring them would re-introduce the multi-store consistency problem Decision 60
+avoids. `prompt_id` being identical on both sides means no mapping table.
+
+---
+
+## Decision 62 — Exactly three relationship types: DERIVED_FROM, FORKED_FROM, DEPENDS_ON
+
+**Decision:** `(:Prompt)-[:DERIVED_FROM]->(:Prompt)` — the child was created from
+the parent (lineage). `(:Prompt)-[:FORKED_FROM]->(:Prompt)` — the child is an
+independent copy taken from the parent. `(:Prompt)-[:DEPENDS_ON]->(:Prompt)` —
+the prompt requires another prompt to be used together. No other relationship
+types are created, and the graph service rejects any `rel_type` outside this
+frozen set (`ValueError`). Self-relationships are rejected.
+
+**Reason:** A small, closed vocabulary keeps the graph explainable and lets the
+relationship type be interpolated into Cypher safely (it is validated against a
+literal `frozenset` before string formatting — Neo4j Community has no APOC for
+dynamic types). Lineage vs. fork vs. dependency are the only prompt-to-prompt
+edges the domain currently has.
+
+---
+
+## Decision 63 — Only DERIVED_FROM has an authoritative source today; FORKED_FROM and DEPENDS_ON are documented gaps
+
+**Decision:** `DERIVED_FROM` is projected from `prompts.parent_prompt_id`
+(Phase 4A lineage). `FORKED_FROM` and `DEPENDS_ON` have **no** authoritative
+column in the Phase 1 schema, so the projection creates none of them. The types
+remain available in the graph service and API so that a future phase can add a
+source table without another design change. We do **not** infer these edges from
+prompt text, embeddings, or an AI model.
+
+**Reason:** The spec is explicit: relationships come only from authoritative
+application data, and if the schema lacks the information we document the
+limitation rather than invent edges. Keeping the types wired up (but unused)
+means the graph contract is stable.
+
+---
+
+## Decision 64 — Synchronisation is an explicit script + a best-effort post-commit hook
+
+**Decision:** Two mechanisms, both idempotent, no queue/broker/worker:
+1. `scripts/sync_neo4j.py` — reads every `prompts` row from PostgreSQL, `MERGE`s
+   a node per row and a `DERIVED_FROM` edge per `parent_prompt_id`, reports
+   created / relationship / pruned counts, and exits non-zero if Neo4j is
+   unreachable. `--prune` deletes nodes whose `prompt_id` is no longer in
+   PostgreSQL; `--dry-run` reports without writing.
+2. A post-commit hook in the prompt service: after the PostgreSQL transaction
+   commits, `project_prompt_after_commit(...)` upserts the one node (and its
+   parent edge). Any Neo4j error is caught and logged as a warning — it never
+   propagates and never rolls back PostgreSQL.
+
+**Reason:** The spec forbids Kafka/Redis/Celery/microservices and asks for
+"simple, explicit" sync. A cron-able script is the reconciliation baseline; the
+hook keeps the projection fresh in the common case. Both use `MERGE`, so running
+either one repeatedly converges without duplicates.
+
+---
+
+## Decision 65 — Eventual consistency; Neo4j outages never touch PostgreSQL
+
+**Decision:** Write order is always: write PostgreSQL → commit PostgreSQL →
+project to Neo4j. If the projection step fails (Neo4j down, network error), the
+PostgreSQL write still succeeds and the API returns success; the graph catches
+up on the next `sync_neo4j.py` run or the next successful hook. Graph *reads*
+against a down Neo4j return `503`; the rest of the API is unaffected.
+
+**Reason:** Neo4j is a supporting index, not a participant in the user's
+transaction. Making prompt creation depend on a second datastore's availability
+would reduce reliability for no correctness gain, since the projection is
+rebuildable.
+
+---
+
+## Decision 66 — Graph traversal is depth-bounded and done in Cypher, never in routes
+
+**Decision:** Four read operations — `ancestors`, `descendants` (both over
+`DERIVED_FROM|FORKED_FROM`), `dependencies` (over `DEPENDS_ON`), and `related`
+(one hop, any of the three types, with direction). Variable-length paths use
+`*1..N` where `N` is clamped to `1..10` and validated as an integer before being
+formatted into the query string. All Cypher lives in
+`app/graph/service.py`; `app/services/graph.py` adds authorization; the FastAPI
+routes contain no Cypher.
+
+**Reason:** Layering matches the rest of the codebase (router → service →
+repository). A hard depth cap keeps traversal cost predictable and stops a deep
+or cyclic lineage from turning into an unbounded query.
+
+---
+
+## Decision 67 — Every graph endpoint re-checks authorization against PostgreSQL
+
+**Decision:** Neo4j is never queried by `prompt_id` alone and the result
+returned as-is. Each graph request: (1) loads the subject prompt from
+PostgreSQL and 404s unless the caller is the owner or the prompt is public
+(same rule as the rest of the API — no existence oracle); (2) runs the
+traversal; (3) filters every returned node through a single PostgreSQL query
+(`prompt_id IN (...) AND (user_id = :viewer OR is_public)`) and uses the
+PostgreSQL title. Nodes that are private-and-not-owned, or absent from
+PostgreSQL, are dropped before serialization. There is no `GET /graph/all`.
+
+**Reason:** The spec calls this out as critical: Neo4j must not become a way to
+bypass PostgreSQL authorization or to discover private prompts by walking edges.
+Re-filtering in PostgreSQL (not in the graph) means the authorization logic has
+exactly one home.
+
+---
+
+## Decision 68 — `NEO4J_ENABLED` gate; graph failures degrade to 503
+
+**Decision:** All Neo4j config comes from env vars (`NEO4J_ENABLED`,
+`NEO4J_URI`, `NEO4J_USERNAME`/`NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`).
+When `NEO4J_ENABLED=false` (the default), the post-commit hook is a no-op and
+every `/api/v1/graph/*` endpoint returns `503` with a plain "knowledge graph is
+not enabled" message. Driver/connectivity errors are logged by exception *type
+name only* — never with a message that could contain the URI or credentials.
+The frontend shows "Graph relationships unavailable" and the prompt page still
+renders.
+
+**Reason:** Mirrors the `PGVECTOR_ENABLED` pattern (Decision 58): an optional
+backing store that is absent should downgrade one feature, not break the app or
+leak connection details.
+
+---
+
+## Decision 69 — Neo4j vs. PostgreSQL vs. pgvector responsibilities
+
+**Decision:**
+- **PostgreSQL** — system of record for every entity, all writes, all
+  authorization, all lineage (`parent_prompt_id`), lexical search.
+- **pgvector (inside PostgreSQL)** — "prompts with *similar meaning*": cosine
+  ANN over version embeddings. Still one database, one transaction, one
+  authorization filter (Decision 54/56).
+- **Neo4j** — "prompts that are *explicitly connected*": multi-hop traversal of
+  the three curated relationship types. Derived, rebuildable, never
+  authoritative.
+
+The UI and docs must state the pgvector-vs-Neo4j distinction wherever either is
+surfaced ("similar meaning" vs. "explicitly connected").
+
+**Reason:** Three overlapping-sounding capabilities ("related prompts") need a
+one-line separation so the design stays explainable and nobody reaches for the
+graph when they mean similarity (or vice versa).
+
+---
+
 ## Non-decisions (still deferred)
 
 - A different embedding model / dimension, and the re-embedding migration it needs.
 - Hybrid (lexical + vector) ranking; reranking; query expansion.
-- Neo4j integration and PostgreSQL→graph sync mechanism; recursive lineage / ancestor-descendant APIs — later phase.
+- Hybrid vector + graph ranking / GraphRAG / graph embeddings / AI-inferred relationships — explicitly out of scope.
+- An authoritative source for `FORKED_FROM` / `DEPENDS_ON` edges (a fork-event column or a prompt-dependency table) — the types are wired up but unpopulated until a later phase adds the source data.
+- Recommendation engine, marketplace, browser extension — not planned.
 - Refresh tokens, server-side token revocation / blacklist, `/auth/logout` — later phase.
 - Roles / permissions / RBAC, SSO, shared-write / prompt collaborators — later phase.
 - Rate limiting & brute-force protection on `/auth/*` — later phase (security hardening).

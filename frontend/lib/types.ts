@@ -125,6 +125,31 @@ export interface SemanticSearchResponse {
   results: SemanticSearchResult[];
 }
 
+// --- graph / prompt relationships (Phase 7) ---------------------------------
+
+export type GraphRelationshipType =
+  | "DERIVED_FROM"
+  | "FORKED_FROM"
+  | "DEPENDS_ON";
+
+export interface GraphRelationship {
+  type: GraphRelationshipType | null;
+  direction: "incoming" | "outgoing" | null;
+  prompt_id: string;
+  title: string;
+  depth: number;
+  rel_types: string[] | null;
+}
+
+export type GraphKind = "ancestors" | "descendants" | "dependencies" | "related";
+
+export interface GraphResponse {
+  prompt_id: string;
+  title: string;
+  kind: GraphKind;
+  relationships: GraphRelationship[];
+}
+
 // --- request payloads ---------------------------------------------------------
 
 export interface PromptCreatePayload {
