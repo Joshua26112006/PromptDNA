@@ -14,3 +14,6 @@ PyJWT>=2.9,<3
 pwdlib[argon2]>=0.2.1,<1
 email-validator>=2.1,<3          # pydantic EmailStr
 python-multipart>=0.0.9,<1       # OAuth2 login form parsing
+
+# Experiments (Phase 5): HTTP client for the AI model provider integrations.
+httpx>=0.27,<0.29

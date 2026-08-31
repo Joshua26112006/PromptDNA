@@ -11,7 +11,11 @@
 // a production build should use an HttpOnly cookie. See docs/decisions.md.
 
 import type {
+  Experiment,
+  ExperimentListResponse,
+  ExperimentRunPayload,
   ListPromptsParams,
+  Model,
   Prompt,
   PromptCreatePayload,
   PromptListResponse,
@@ -244,6 +248,45 @@ export async function createVersion(
 ): Promise<Version> {
   return request<Version>(`/api/v1/prompts/${promptId}/versions`, {
     method: "POST",
+    body: payload,
+  });
+}
+
+// --- experiments / models (Phase 5) -----------------------------
+
+export async function listModels(): Promise<Model[]> {
+  return request<Model[]>("/api/v1/models");
+}
+
+export async function listPromptExperiments(
+  promptId: string,
+): Promise<ExperimentListResponse> {
+  return request<ExperimentListResponse>(
+    `/api/v1/prompts/${promptId}/experiments`,
+  );
+}
+
+export async function runExperiment(
+  promptId: string,
+  versionId: string,
+  payload: ExperimentRunPayload,
+): Promise<Experiment> {
+  return request<Experiment>(
+    `/api/v1/prompts/${promptId}/versions/${versionId}/experiments`,
+    { method: "POST", body: payload },
+  );
+}
+
+export async function getExperiment(experimentId: string): Promise<Experiment> {
+  return request<Experiment>(`/api/v1/experiments/${experimentId}`);
+}
+
+export async function updateExperimentScore(
+  experimentId: string,
+  payload: { score?: number | null; notes?: string | null },
+): Promise<Experiment> {
+  return request<Experiment>(`/api/v1/experiments/${experimentId}`, {
+    method: "PATCH",
     body: payload,
   });
 }

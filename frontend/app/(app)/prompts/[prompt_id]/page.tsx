@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { CreateVersionForm } from "@/components/CreateVersionForm";
 import { EditMetadataForm } from "@/components/EditMetadataForm";
+import { ExperimentSection } from "@/components/ExperimentSection";
 import { buttonPrimary, buttonSecondary, ErrorBox, formatDate, Spinner } from "@/components/ui";
 import { VersionHistory } from "@/components/VersionHistory";
 import { VersionPanel } from "@/components/VersionPanel";
@@ -234,6 +235,15 @@ export default function PromptDetailPage() {
         latestNumber={latestNumber}
         selectedId={selected?.version_id ?? null}
         onSelect={setSelectedId}
+      />
+
+      <ExperimentSection
+        promptId={prompt.prompt_id}
+        isOwner={isOwner}
+        currentVersionId={
+          prompt.latest_version ? prompt.latest_version.version_id : null
+        }
+        currentVersionNumber={latestNumber}
       />
 
       {!isOwner && (

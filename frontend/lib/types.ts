@@ -65,6 +65,46 @@ export interface VersionListResponse {
   total: number;
 }
 
+// --- experiments / models (Phase 5) ----------------------------------------
+
+export interface Model {
+  model_id: string;
+  name: string;
+  provider: string;
+  created_at: string;
+  /** a registered provider for `provider` has credentials on this server */
+  execution_configured: boolean;
+}
+
+export type ExperimentStatus = "PENDING" | "SUCCESS" | "FAILED";
+
+export interface Experiment {
+  experiment_id: string;
+  version_id: string;
+  prompt_id: string;
+  model_id: string;
+  model_name: string;
+  provider: string;
+  version_number: number;
+  executed_at: string;
+  response_time_ms: number | null;
+  score: number | string | null;
+  output: string | null;
+  notes: string | null;
+  status: ExperimentStatus;
+  error_message: string | null;
+}
+
+export interface ExperimentListResponse {
+  items: Experiment[];
+  total: number;
+}
+
+export interface ExperimentRunPayload {
+  model_id: string;
+  notes?: string | null;
+}
+
 // --- request payloads ---------------------------------------------------------
 
 export interface PromptCreatePayload {

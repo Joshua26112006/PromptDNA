@@ -615,6 +615,109 @@ E2E stack (Playwright) is deferred.
 
 ---
 
+# Phase 5 decisions (experiment system + AI model execution)
+
+## Decision 46 — Provider abstraction; the service never sees HTTP
+
+**Decision:** `app/providers/base.py::LLMProvider` exposes `is_configured()` and
+`generate(model_name, prompt_text, timeout_s) -> str`, raising typed
+`ProviderError` subclasses. `registry.get_provider(models.provider)` returns an
+instance. The experiment service depends only on this interface.
+
+**Reason:** Keeps provider-specific HTTP/SDK details out of routes and services;
+adding Anthropic/Google is a new subclass + one registry line. Testable by
+injecting a fake.
+
+---
+
+## Decision 47 — A `models` row describes a model; execution needs a configured provider
+
+**Decision:** A run is refused with **`503`** (and **no experiment row**) when
+the model's `provider` has no registered provider, or the provider reports
+`is_configured() == False` (e.g. `OPENAI_API_KEY` unset). Seeded GPT-5 / Claude
+/ Gemini are therefore visible and describable but not runnable without keys.
+
+**Reason:** The spec: "Do not assume every database model automatically has an
+executable provider" and "fail gracefully with a clear configuration error".
+`503` (service not configured) is distinguished from `4xx` (bad request).
+
+---
+
+## Decision 48 — Built-in `MockProvider` for dev/tests — explicitly named, not a fake vendor
+
+**Decision:** A `MockProvider` (provider key `mock`, `ENABLE_MOCK_PROVIDER`,
+default on) returns a deterministic, obviously-synthetic echo of the prompt
+text. It is its own provider — a `models` row must have `provider = 'mock'` to
+use it. It never reports a failed call as success.
+
+**Reason:** Lets the whole experiment pipeline (and the frontend demo) run
+without paid APIs, and gives tests a deterministic provider. The spec forbids
+faking *real* provider responses — this is a distinct, labelled provider.
+
+---
+
+## Decision 49 — Two-transaction lifecycle; no DB transaction across the external call
+
+**Decision:** `validate → BEGIN; INSERT experiment PENDING; COMMIT → provider
+call → BEGIN; UPDATE experiment (SUCCESS|FAILED, output/error,
+response_time_ms, executed_at); COMMIT`. The service owns both boundaries;
+repositories never commit.
+
+**Reason:** An AI call can take many seconds; holding a transaction (and its
+locks) open across it is wasteful and risky. Committing the `PENDING` row first
+also means a crash mid-call leaves an auditable `PENDING` experiment rather than
+nothing.
+
+---
+
+## Decision 50 — Response time measured with `perf_counter`, stored as integer ms
+
+**Decision:** `started = time.perf_counter()` around `provider.generate(...)`;
+`response_time_ms = int(elapsed * 1000)`, recorded on both success and failure.
+Never derived from `executed_at`/wall-clock timestamps.
+
+**Reason:** `perf_counter` is monotonic and unaffected by clock adjustments —
+the correct tool for a duration. Timestamps measure *when*, not *how long*.
+
+---
+
+## Decision 51 — Failures are recorded as `FAILED` with a safe message, not surfaced as 5xx
+
+**Decision:** Provider timeout / HTTP error / malformed response → the
+experiment is committed as `status = "FAILED"` with a short `safe_message`
+(≤ 500 chars, no keys, no raw payloads) and the endpoint returns `201` with that
+experiment. Only *pre-execution* problems (auth, missing model, unconfigured
+provider) return an error status with no row.
+
+**Reason:** A failed run is a legitimate, recordable outcome for comparison —
+losing it (or returning 500) would be worse. Raw provider errors can leak
+request URLs / keys, so only a curated message is stored.
+
+---
+
+## Decision 52 — `experiments.score` is a human rating (0–10), set via PATCH by the owner
+
+**Decision:** Execution creates the result; a separate owner-only
+`PATCH /experiments/{id}` sets `score` (Pydantic `0–10`, also a DB `CHECK`)
+and/or `notes`. No automatic AI scoring algorithm was built.
+
+**Reason:** The spec: "Do NOT invent an automatic AI scoring algorithm unless
+explicitly justified." A human score is enough to demonstrate the field and
+keeps the experiment concept clean. This is distinct from the semantic-similarity
+score of a later phase.
+
+---
+
+## Decision 53 — Bounded/no retries; rate limiting deferred
+
+**Decision:** No automatic retry of a failed provider call. Each call has a hard
+timeout (`EXPERIMENT_PROVIDER_TIMEOUT_S`, default 30 s). No rate limiter.
+
+**Reason:** Model calls cost money; silent retries multiply that. Production
+should add rate limits and cost controls (documented as future hardening).
+
+---
+
 ## Non-decisions (still deferred)
 
 - pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.

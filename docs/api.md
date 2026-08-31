@@ -233,6 +233,65 @@ a version, at either `/versions` or `/versions/{id}` (any such method → `405`)
 version cannot be changed through the API. Version history is preserved
 indefinitely.
 
+## Experiments & models (Phase 5)  *(auth required)*
+
+> **An experiment records the execution of a specific immutable prompt version
+> against a specific model, preserving the result and execution metadata for
+> later comparison.** It runs `version.content` verbatim — never a prompt
+> reconstructed from title/description — so it is reproducible.
+
+### `GET /api/v1/models`
+Every `models` row + `execution_configured` (a registered provider for its
+`provider` has credentials on this server). **Never** returns API keys.
+
+### `POST /api/v1/prompts/{prompt_id}/versions/{version_id}/experiments`  *(owner only)*
+Body (`ExperimentRunRequest`, unknown fields rejected — incl. `output`,
+`status`, `response_time_ms`, `executed_at`, `version_id`, `prompt_id`):
+
+| field | type | rules |
+|-------|------|-------|
+| `model_id` | uuid | required — must exist |
+| `notes` | string \| null | optional, ≤ 20 000 |
+
+Authorization: only the **prompt owner** may execute. A public prompt owned by
+someone else → `403`; a private prompt owned by someone else, or missing →
+`404`. Version must belong to the prompt (`404` otherwise).
+
+Flow: validate → create a `PENDING` experiment and **commit** → call the
+provider (timed with `perf_counter`, capped by `EXPERIMENT_PROVIDER_TIMEOUT_S`,
+default 30 s; **no DB transaction is held during the call**) → **commit** the
+result:
+
+- success → `status = "SUCCESS"`, `output` stored, `response_time_ms` (int),
+  `executed_at`.
+- provider failure / timeout / malformed response → `status = "FAILED"`,
+  a **safe** `error_message` (no keys, no raw payloads), `response_time_ms`,
+  `executed_at`. **Never** faked as success.
+
+Responses: `201` → `ExperimentRead` (SUCCESS or FAILED); `403` / `404`;
+`503` if the model has **no registered/configured execution provider** (no
+experiment row is created); `422` (validation); `401`.
+
+`ExperimentRead`: `experiment_id, version_id, prompt_id, model_id, model_name,
+provider, version_number, executed_at, response_time_ms, score, output, notes,
+status, error_message`.
+
+### `GET /api/v1/prompts/{prompt_id}/experiments`  ·  `.../versions/{version_id}/experiments`
+Experiments for a prompt's versions / one version, newest first. Visibility =
+the parent prompt's (owner or `is_public`; else `404`). `ExperimentListResponse`
+`{items, total}`.
+
+### `GET /api/v1/experiments/{experiment_id}`
+One experiment, authorized **through its owning prompt** — an experiment id
+cannot bypass prompt visibility (`404` if the caller may not view the prompt).
+
+### `PATCH /api/v1/experiments/{experiment_id}`  *(owner only)*
+Body (`ExperimentScoreRequest`): `score` (number, **0–10**, also a DB `CHECK`) and/or
+`notes`. Partial (`model_fields_set`). This is a **human** rating — there is no
+automatic AI scoring. Non-owner → `403` (public) / `404` (private). Never touches
+the version or the execution result. Semantic-similarity scores (a later phase)
+are a different concept.
+
 ## Search
 
 `GET /api/v1/prompts?search=` is **lexical only**: a case-insensitive `ILIKE`
@@ -265,15 +324,17 @@ Uniform body `{"detail": "<safe message>"}`.
 | Code | When |
 |------|------|
 | 401 | not authenticated / bad / expired token (adds `WWW-Authenticate: Bearer`) |
-| 403 | the resource's existence is already public (a public prompt) but the caller lacks write permission — `POST /{id}/versions` or `PATCH /{id}` by a non-owner. **Never** used for private resources (those are `404`). |
-| 404 | prompt/version not found, **or** a private prompt/version the caller may not see, **or** a version requested under the wrong prompt id, **or** a bad/inaccessible `parent_prompt_id` |
+| 403 | the resource's existence is already public (a public prompt) but the caller lacks write permission — `POST /{id}/versions`, `PATCH /prompts/{id}`, `POST .../experiments`, `PATCH /experiments/{id}` by a non-owner. **Never** for private resources (those are `404`). |
+| 404 | prompt/version/experiment/model not found, **or** a private resource the caller may not see, **or** a version/experiment requested under the wrong prompt id, **or** a bad/inaccessible `parent_prompt_id` |
 | 409 | email already registered; or a version-number could not be allocated after retries under concurrent writes |
-| 422 | Pydantic / query / path validation (incl. rejected unknown body fields) |
+| 422 | Pydantic / query / path validation (incl. rejected unknown body fields; `score` outside 0–10) |
 | 500 | unexpected server error — body is exactly `{"detail":"Internal server error"}` |
-| 503 | `/health/db` when PostgreSQL is unreachable |
+| 503 | `/health/db` when PostgreSQL is unreachable; **or** an experiment run against a model whose provider is unregistered / has no credentials on this server (no experiment row is created) |
 
 Never returned to clients: SQL text, connection strings, credentials, the JWT
-secret, password hashes, or stack traces. The app runs with `debug=False`.
+secret, password hashes, **AI provider API keys**, raw provider error payloads,
+or stack traces. The app runs with `debug=False`. A failed provider call is
+recorded as a `FAILED` experiment (with a safe message), not surfaced as a 5xx.
 
 ## CORS
 

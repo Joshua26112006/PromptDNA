@@ -290,9 +290,71 @@ version history, owner vs non-owner controls, immutable-version controls,
 create-prompt payload, create-version payload, logout state.
 
 **Semantic search is not implemented yet. The current search is lexical title
-search backed by PostgreSQL (`ILIKE`).** No Neo4j, pgvector, embeddings,
-experiments, tags, or collections functionality exists.
+search backed by PostgreSQL (`ILIKE`).**
 
-Explicitly **out of scope** for Phase 4B: everything in Phase 5+ (experiments UI,
-AI execution), semantic search, tags/collections/graph/analytics UI, prompt
-deletion UI.
+Explicitly **out of scope** for Phase 4B: semantic search,
+tags/collections/graph/analytics UI, prompt deletion UI.
+
+## Phase 5 scope (done) — experiment system + AI model execution
+
+```
+Prompt ─ Version N ──(experiments.version_id)──►  Experiment  ──(experiments.model_id)──►  Model
+                                                     │
+                                       app/services/experiment.py
+                                                     │
+                                       app/providers/  (LLMProvider abstraction)
+                                        ├── MockProvider   (provider "mock" — dev/tests, deterministic)
+                                        └── OpenAIProvider  (provider "OpenAI" — real, httpx, needs OPENAI_API_KEY)
+                                                     │
+                                              AI model API
+```
+
+An **experiment records the execution of a specific immutable prompt version
+against a specific model, preserving the result and execution metadata for
+later comparison.** It references `version_id` directly (not "the prompt") and
+runs `version.content` **verbatim** — never a prompt reconstructed from
+title/description — so a run is reproducible.
+
+- **Provider abstraction** (`app/providers/base.py`): `LLMProvider` with
+  `is_configured()` and `generate(model_name, prompt_text, timeout_s) -> str`,
+  raising typed `ProviderError` (`ProviderNotConfigured`, `ProviderTimeout`,
+  `ProviderRequestError`). The service never sees HTTP. `registry.get_provider`
+  maps a `models.provider` string → provider instance.
+- **Providers**: `MockProvider` (key `mock`, always configured, deterministic
+  echo — an explicit dev/test provider, not a fake of a vendor);
+  `OpenAIProvider` (key `openai`, `httpx` POST to `/chat/completions`, per-call
+  timeout, `is_configured()` = `OPENAI_API_KEY` set). GPT-5/Claude/Gemini seed
+  rows have a registered provider but are unconfigured without a key → runs
+  against them return `503` cleanly (no experiment row).
+- **Endpoints** (all auth-required):
+  `POST /api/v1/prompts/{id}/versions/{vid}/experiments` (owner only — `403`
+  for a public prompt owned by another user, `404` for private/missing),
+  `GET /api/v1/prompts/{id}/experiments`,
+  `GET /api/v1/prompts/{id}/versions/{vid}/experiments`,
+  `GET /api/v1/experiments/{id}` (authorized through its prompt — an experiment
+  id cannot bypass visibility),
+  `PATCH /api/v1/experiments/{id}` (owner-only `score` 0–10 / `notes`),
+  `GET /api/v1/models` (`execution_configured` flag; **no keys**).
+- **Lifecycle & transactions**: validate → `BEGIN; INSERT experiment PENDING;
+  COMMIT` → `provider.generate()` (**no DB transaction held**) → `BEGIN; UPDATE
+  experiment SUCCESS|FAILED (+output/error, response_time_ms, executed_at);
+  COMMIT`. A failed/timed-out/malformed provider call is recorded as `FAILED`
+  with a safe `error_message` — never faked as `SUCCESS`.
+- **Response time**: wall-clock duration of the provider call via
+  `time.perf_counter()` (monotonic), stored as integer milliseconds. Not
+  fabricated; not derived from timestamps.
+- **Score** (`experiments.score`, DB `CHECK 0..10`) is a **human** rating set
+  via `PATCH` by the owner — no automatic AI scoring algorithm.
+- **API-key security**: keys are server-side settings only — never in a
+  response, a log line, a DB row, or an error message.
+- **No schema change** (the Phase 1 `experiments` / `models` tables already fit)
+  and **no migration**; `alembic check` clean. Neo4j / pgvector / semantic
+  search untouched.
+- **Frontend**: `/prompts/[id]` gains an Experiments section — history (status,
+  model, version, response time, score-or-"Not scored", output/error) and, for
+  the owner, a "Run Experiment" form (model select + notes) that shows exactly
+  which version is being tested. Vitest suite mocks the API — no real AI.
+
+Explicitly **out of scope** for Phase 5: pgvector / embeddings / semantic
+search, Neo4j, automatic scoring, analytics, rate limiting, retries beyond a
+bounded/none policy.

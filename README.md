@@ -83,7 +83,9 @@ python -m venv .venv
 
 - Liveness: <http://localhost:8000/health> · DB readiness: <http://localhost:8000/health/db>
 - Auth: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`
-- API (v1): <http://localhost:8000/api/v1/prompts> (send `Authorization: Bearer <token>`) · docs: <http://localhost:8000/docs>
+- Prompts/versions: `/api/v1/prompts…` · Experiments: `/api/v1/prompts/{id}/versions/{vid}/experiments`, `/api/v1/experiments/{id}`, `/api/v1/models`
+- API (v1): send `Authorization: Bearer <token>` · docs: <http://localhost:8000/docs>
+- Experiments (Phase 5): set `OPENAI_API_KEY` for real OpenAI execution; without it the built-in `mock` provider (`ENABLE_MOCK_PROVIDER=true`) runs models whose `provider` is `mock`.
 - Tests (need a real PostgreSQL test DB):
   `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
 - Full endpoint reference: [`docs/api.md`](docs/api.md)
@@ -163,15 +165,27 @@ Real authenticated UI on the existing frontend (Next.js App Router). Pages:
 filter, `limit`/`offset` pagination), `/prompts/new` (create prompt + Version 1),
 `/prompts/[prompt_id]` (metadata, current version, version history, single
 parent "Derived from" link, owner-only Edit Metadata / Create New Version).
-Centralized `lib/api.ts` client (base URL, bearer header, `friendlyMessage`);
-`AuthProvider` with `loading`/`authenticated`/`unauthenticated`; protected route
-group redirects to `/login`. Owner-only write controls are hidden for non-owners
-(**backend still enforces**). Historical versions expose no edit/delete controls.
-Vitest + React Testing Library added (18 tests). **No backend change, no schema
-change, no migration.**
+Centralized `lib/api.ts` client; `AuthProvider` with
+`loading`/`authenticated`/`unauthenticated`; protected route group. Vitest +
+React Testing Library added.
+
+### Phase 5 — experiment system + AI model execution ✅
+`POST /api/v1/prompts/{id}/versions/{vid}/experiments` runs a **specific
+immutable version's content** against a model behind an `LLMProvider`
+abstraction (`app/providers/`: `MockProvider` for dev/tests, `OpenAIProvider`
+real via `httpx`). Owner-only execution (public prompt → `403`). Lifecycle:
+`PENDING` committed → provider call (timed with `perf_counter`, `EXPERIMENT_
+PROVIDER_TIMEOUT_S`) → `SUCCESS` (output stored) or `FAILED` (safe
+`error_message`) — never faked. No DB transaction is held across the external
+call. `GET /api/v1/prompts/{id}/experiments`, `GET .../versions/{vid}/experiments`,
+`GET /api/v1/experiments/{id}` (authorized via the owning prompt),
+`PATCH /api/v1/experiments/{id}` (owner-only score 0–10 / notes),
+`GET /api/v1/models` (with `execution_configured`, never keys). Frontend:
+experiment history + owner-only "Run Experiment" on `/prompts/[id]`.
+**No schema change, no migration.** Neo4j / pgvector / semantic search untouched.
 
 ### Not started (by design)
 Prompt deletion, version editing, recursive/graph lineage APIs, refresh tokens /
-token revocation, roles / RBAC / SSO, rate limiting, pgvector / embeddings /
-semantic search, Neo4j integration, experiments UI, tags/collections UI,
+token revocation, roles / RBAC / SSO, rate limiting, automatic AI scoring,
+pgvector / embeddings / semantic search, Neo4j integration, tags/collections UI,
 dashboard, analytics UI, production deployment.

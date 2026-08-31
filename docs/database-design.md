@@ -140,6 +140,27 @@ the composite unique index, which already serves `WHERE prompt_id = ?`.
 Indexes: `ix_experiments_version_id`, `ix_experiments_model_id`,
 `ix_experiments_executed_at`.
 
+**Phase 5 usage — no schema change.** An experiment is created and populated
+entirely through these existing columns:
+
+```
+versions.version_id  ──(experiments.version_id, ON DELETE CASCADE)──►  experiments
+models.model_id      ──(experiments.model_id,   ON DELETE RESTRICT)──►  experiments
+```
+
+- `experiments.version_id` binds a run to **one immutable version** (dropping a
+  version cascades its experiments; the run always used `versions.content` of
+  that exact `version_id`). `versions.content` is never modified by a run.
+- `experiments.model_id` binds a run to **one model** (a model referenced by any
+  experiment cannot be deleted — `RESTRICT` — so historical results stay
+  interpretable). `models.provider` selects the execution provider at run time;
+  it is not copied into `experiments`.
+- Lifecycle uses `status` (`PENDING` → `SUCCESS` | `FAILED`), `output` /
+  `error_message`, `response_time_ms` (integer ms from `perf_counter`),
+  `executed_at`. `score` (0–10) is set later by the owner. The embedding-model
+  used for a run is **not** stored — no such column exists and Phase 5 adds
+  none.
+
 ### Table: `tags`
 
 | Column | Type | Null | Notes |

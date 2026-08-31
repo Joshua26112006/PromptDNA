@@ -107,12 +107,20 @@ backend/
 │   ├── schemas/
 │   │   ├── auth.py            RegisterRequest / UserRead / TokenResponse
 │   │   └── prompt.py          PromptCreate / PromptRead / *ListResponse / VersionRead
+│   ├── providers/            LLMProvider abstraction (Phase 5)
+│   │   ├── base.py            LLMProvider + typed ProviderError subclasses
+│   │   ├── mock.py            MockProvider (provider "mock" — dev/tests, deterministic)
+│   │   ├── openai.py          OpenAIProvider (real, httpx; needs OPENAI_API_KEY)
+│   │   └── registry.py        models.provider string -> provider instance
 │   ├── services/
 │   │   ├── auth.py            register + login (authentication)
-│   │   └── prompt.py          create/append/patch transactions + authorization (visibility, owner-only, lineage)
+│   │   ├── prompt.py          create/append/patch transactions + authorization
+│   │   └── experiment.py      run experiment (2-transaction), score, retrieval, list_models
 │   ├── repositories/
 │   │   ├── user.py            get_by_id / get_by_email / add_user
-│   │   └── prompt.py          prompt/version access; visibility predicate; get_max_version_number; get_version_by_id; update_prompt
+│   │   ├── prompt.py          prompt/version access; visibility predicate; version-number; update
+│   │   ├── model.py           get_by_id / list_all
+│   │   └── experiment.py      add / get (with model+version+prompt) / list_for_prompt|version / apply_result / update_score
 │   └── db/
 │       ├── base.py            DeclarativeBase + constraint naming convention
 │       ├── models.py          the 9 Phase 1 tables (schema only — UNCHANGED)
@@ -132,7 +140,8 @@ backend/
 │   ├── test_auth.py           Phase 3: authentication (13 cases + hash check)
 │   ├── test_authz.py          Phase 3: authorization + security attack scenario
 │   ├── test_versions.py       Phase 4A: version append / numbering / immutability / retrieval / 409
-│   └── test_lineage.py        Phase 4A: parent_prompt_id fork rules
+│   ├── test_lineage.py        Phase 4A: parent_prompt_id fork rules
+│   └── test_experiments.py    Phase 5: run/score/retrieve experiments (provider mocked)
 ├── requirements.txt / requirements-dev.txt
 └── pyproject.toml             pytest config
 ```

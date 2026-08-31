@@ -57,6 +57,19 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    # -- Experiments / AI model execution (Phase 5) ----------------
+    # API keys for real providers. Absent -> that provider reports
+    # "not configured" and execution against its models is refused cleanly
+    # (no experiment row is created). Keys are never logged or returned.
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    # Hard cap on a single provider call. Chosen for local development —
+    # production should tune this and add rate/cost controls.
+    experiment_provider_timeout_s: float = 30.0
+    # The built-in deterministic provider (provider name "mock"/"echo").
+    # Enabled by default for local dev and tests; set false to disable.
+    enable_mock_provider: bool = True
+
     # -- Neo4j: supporting graph projection (not used in Phase 0) -------
     neo4j_uri: str | None = None
     neo4j_username: str | None = None
