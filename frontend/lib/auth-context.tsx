@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -11,16 +12,20 @@ import {
 
 import {
   clearToken,
+  getCurrentUser,
   getToken,
   login as apiLogin,
-  me as apiMe,
   register as apiRegister,
   setToken,
-  type User,
 } from "./api";
+import type { User } from "./types";
+
+type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 interface AuthState {
   user: User | null;
+  status: AuthStatus;
+  /** convenience: `status === "loading"` */
   loading: boolean;
   register: (name: string, email: string, password: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
@@ -30,23 +35,28 @@ interface AuthState {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<AuthStatus>("loading");
 
-  // On mount: if a token is present, try to resolve the current user.
+  // On mount: resolve the stored token (if any) to a user.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const token = getToken();
+      if (!token) {
+        if (!cancelled) setStatus("unauthenticated");
+        return;
+      }
       try {
-        if (token) {
-          const resolved = await apiMe(token);
-          if (!cancelled) setUser(resolved);
+        const resolved = await getCurrentUser();
+        if (!cancelled) {
+          setUser(resolved);
+          setStatus("authenticated");
         }
       } catch {
         clearToken();
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setStatus("unauthenticated");
       }
     })();
     return () => {
@@ -57,29 +67,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const token = await apiLogin(email, password);
     setToken(token);
-    setUser(await apiMe(token));
+    const resolved = await getCurrentUser();
+    setUser(resolved);
+    setStatus("authenticated");
   }, []);
 
   const register = useCallback(
     async (name: string, email: string, password: string) => {
       await apiRegister(name, email, password);
-      // Convenience: log in immediately after registering.
+      // The backend flow issues tokens via /login — sign in immediately.
       const token = await apiLogin(email, password);
       setToken(token);
-      setUser(await apiMe(token));
+      const resolved = await getCurrentUser();
+      setUser(resolved);
+      setStatus("authenticated");
     },
     [],
   );
 
   const logout = useCallback(() => {
-    // Stateless JWT: logout is purely client-side — drop the token.
+    // Stateless JWT (Phase 3): purely client-side — drop the token and state.
     clearToken();
     setUser(null);
-  }, []);
+    setStatus("unauthenticated");
+    router.replace("/login");
+  }, [router]);
 
-  const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+  const value = useMemo<AuthState>(
+    () => ({ user, status, loading: status === "loading", login, register, logout }),
+    [user, status, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

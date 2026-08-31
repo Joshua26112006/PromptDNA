@@ -1,87 +1,98 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
+import { buttonPrimary, ErrorBox, InfoNote, TextField } from "@/components/ui";
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-export default function LoginPage() {
-  const { login } = useAuth();
+function LoginForm() {
+  const { login, status } = useAuth();
   const router = useRouter();
+  const params = useSearchParams();
+  const expired = params.get("expired") === "1";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (status === "authenticated") router.replace("/prompts");
+  }, [status, router]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!email || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
       await login(email, password);
-      router.push("/");
+      router.replace("/prompts");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
+      if (err instanceof ApiError && err.status === 401) {
+        setError("Invalid email or password.");
+      } else if (err instanceof ApiError && err.status === 0) {
+        setError("Unable to connect to the server.");
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
       setBusy(false);
     }
   }
 
   return (
     <main className="flex flex-1 items-center justify-center p-8">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-sm space-y-4"
-        aria-labelledby="login-heading"
-      >
+      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4" aria-labelledby="login-heading">
         <h1 id="login-heading" className="text-2xl font-semibold">
-          Log in
+          Log in to PromptDNA
         </h1>
 
-        <label className="block space-y-1">
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">Email</span>
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded border border-neutral-300 bg-transparent px-3 py-2 dark:border-neutral-700"
-          />
-        </label>
+        {expired && <InfoNote>Your session has expired. Please log in again.</InfoNote>}
 
-        <label className="block space-y-1">
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">Password</span>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded border border-neutral-300 bg-transparent px-3 py-2 dark:border-neutral-700"
-          />
-        </label>
+        <TextField
+          label="Email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <TextField
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
 
-        {error && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
-        )}
+        {error && <ErrorBox message={error} />}
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-neutral-900 px-3 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-        >
+        <button type="submit" disabled={busy} className={`w-full ${buttonPrimary}`}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
 
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
           No account?{" "}
           <Link href="/register" className="underline">
-            Register
+            Create an account
           </Link>
         </p>
       </form>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

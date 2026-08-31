@@ -93,8 +93,15 @@ python -m venv .venv
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:3000
+cp .env.example .env.local     # set NEXT_PUBLIC_API_BASE_URL (default http://localhost:8000)
+npm run dev        # http://localhost:3000  — open /login
+npm run lint
+npm run build
+npm run test       # vitest — no backend needed
 ```
+
+Pages: `/login`, `/register`, `/prompts` (Prompt Library), `/prompts/new`,
+`/prompts/[prompt_id]` (Prompt Detail — versions, history, owner-only editing).
 
 ### 4. Database (Phase 1)
 
@@ -148,12 +155,23 @@ race), `GET /api/v1/prompts/{id}/versions/{vid}` (belongs-to + visibility
 checked; `404` otherwise), `PATCH /api/v1/prompts/{id}` (metadata only, owner
 only). `parent_prompt_id` optional on create — fork/derive from any prompt you
 can view; the fork is owned by the creator, the parent is untouched. Versions
-have **no** PUT/PATCH/DELETE. Search stays lexical. See
-[`docs/api.md`](docs/api.md). **No schema change, no new migration** — Neo4j /
-pgvector / embeddings / semantic search untouched.
+have **no** PUT/PATCH/DELETE. Search stays lexical.
+
+### Phase 4B — Prompt Library frontend ✅
+Real authenticated UI on the existing frontend (Next.js App Router). Pages:
+`/login`, `/register`, `/prompts` (library — backend `search`, `is_public`
+filter, `limit`/`offset` pagination), `/prompts/new` (create prompt + Version 1),
+`/prompts/[prompt_id]` (metadata, current version, version history, single
+parent "Derived from" link, owner-only Edit Metadata / Create New Version).
+Centralized `lib/api.ts` client (base URL, bearer header, `friendlyMessage`);
+`AuthProvider` with `loading`/`authenticated`/`unauthenticated`; protected route
+group redirects to `/login`. Owner-only write controls are hidden for non-owners
+(**backend still enforces**). Historical versions expose no edit/delete controls.
+Vitest + React Testing Library added (18 tests). **No backend change, no schema
+change, no migration.**
 
 ### Not started (by design)
 Prompt deletion, version editing, recursive/graph lineage APIs, refresh tokens /
 token revocation, roles / RBAC / SSO, rate limiting, pgvector / embeddings /
-semantic search, Neo4j integration, tags/collections UI, dashboard, analytics
-UI, production deployment.
+semantic search, Neo4j integration, experiments UI, tags/collections UI,
+dashboard, analytics UI, production deployment.

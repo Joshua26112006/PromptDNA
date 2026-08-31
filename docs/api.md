@@ -1,8 +1,14 @@
-# PromptDNA API (Phase 4A)
+# PromptDNA API (Phase 4A / 4B)
 
 Database-backed HTTP API over the Phase 1 PostgreSQL schema, with JWT bearer
 authentication, per-user authorization, and the core prompt + immutable-version
-management endpoints.
+management endpoints. Phase 4B added the **Prompt Library frontend** (Next.js) —
+no API changes; the frontend consumes the endpoints below through
+`frontend/lib/api.ts`.
+
+> **Semantic search is not implemented yet. The current search is lexical title
+> search backed by PostgreSQL (`ILIKE`).** Vector / semantic search is a later
+> phase (pgvector).
 
 > **The Phase 2 `X-Dev-User-ID` header has been removed and is no longer
 > accepted.** Authenticated endpoints require `Authorization: Bearer <token>`.
@@ -331,6 +337,22 @@ etc.).
 - No prompt `DELETE` endpoint (deferred to a later lifecycle-management phase).
 - Token stored in `localStorage` by the dev frontend (XSS trade-off — see
   `docs/decisions.md`).
+
+## Frontend (Phase 4B)
+
+The Next.js app is a thin client over these endpoints. It never re-implements
+authorization — hidden write controls are UX only; the API returns `401`/`403`/
+`404` regardless.
+
+| Page | Endpoints used |
+|------|----------------|
+| `/login`, `/register` | `POST /auth/login`, `POST /auth/register`, `GET /auth/me` |
+| `/prompts` (Prompt Library) | `GET /api/v1/prompts` with `search` (lexical), `is_public`, `limit`, `offset`; pagination from `total` |
+| `/prompts/new` | `POST /api/v1/prompts` (title, content, description, purpose, is_public — no ownership fields) |
+| `/prompts/[id]` (Prompt Detail) | `GET /api/v1/prompts/{id}`, `GET /api/v1/prompts/{id}/versions`; owner-only `PATCH /api/v1/prompts/{id}` and `POST /api/v1/prompts/{id}/versions` ({content, change_summary}); parent link via `GET /api/v1/prompts/{parent_id}` |
+
+Token: stored in `localStorage`, sent as `Authorization: Bearer`. Base URL from
+`NEXT_PUBLIC_API_BASE_URL`. Logout is client-side only.
 
 ## Run
 

@@ -518,6 +518,103 @@ endpoint and permits it when cleanly separated — it is.
 
 ---
 
+# Phase 4B decisions (Prompt Library frontend)
+
+## Decision 39 — One centralized frontend API client (`lib/api.ts`)
+
+**Decision:** Every call to FastAPI goes through `lib/api.ts`. It owns the base
+URL (`NEXT_PUBLIC_API_BASE_URL`), the `Authorization: Bearer` header, JSON
+encode/parse, and turns failures into a typed `ApiError { status, detail }`
+plus a `friendlyMessage(err)` helper. Components import named functions
+(`listPrompts`, `getPrompt`, `createPrompt`, `updatePromptMetadata`,
+`getVersions`, `getVersion`, `createVersion`, …) — never `fetch`.
+
+**Reason:** No duplicated fetch/error logic; the bearer header and base URL are
+set in exactly one place; error copy is consistent. No data-fetching library
+(SWR/React Query) or global store (Redux) — plain React state + one context is
+enough at this size.
+
+---
+
+## Decision 40 — Backend is the only authority; the UI just reflects it
+
+**Decision:** The frontend never re-implements authentication, authorization,
+ownership, visibility, validation, version numbering, or immutability. It hides
+owner-only controls (Edit Metadata, Create New Version) for non-owners purely
+for UX; the API still returns `401`/`403`/`404` if those calls are made anyway.
+
+**Reason:** "If a button is hidden, the user is authorized" is not a security
+model. Keeping all rules server-side means the UI can't drift from or weaken
+them.
+
+---
+
+## Decision 41 — Auth state machine + protected route group
+
+**Decision:** `useAuth()` exposes `status ∈ {loading, authenticated,
+unauthenticated}`. `app/(app)/*` renders inside `<ProtectedShell>`: a spinner
+while `loading` (the protected UI is never flashed), a redirect to `/login`
+while `unauthenticated`, the app shell once `authenticated`. `/login` and
+`/register` redirect to `/prompts` when already authenticated. A `401` from any
+API call triggers `logout()` → `/login`.
+
+**Reason:** Simple, predictable, no flash-of-protected-content, no redirect
+loops (each guard checks the resolved status, not a guess).
+
+---
+
+## Decision 42 — Immutable-version UI: read-only, visibly marked, no controls
+
+**Decision:** Version history and the version panel render content as read-only
+text (never in an input/textarea). The current version is marked `CURRENT`;
+historical versions are marked `IMMUTABLE` / "Historical version". There is no
+"Edit Version" or "Delete Version" control anywhere — the app never renders one.
+The only content-editing path is **Create New Version** (owner only), which adds
+a new version.
+
+**Reason:** Mirrors the backend rule (Decision 33) in the UI so it's obvious to
+users, and removes any affordance that would imply mutation.
+
+---
+
+## Decision 43 — Metadata editing is a distinct flow from content
+
+**Decision:** `EditMetadataForm` (`PATCH /prompts/{id}`) changes only title /
+description / purpose / visibility and shows an explicit note that it does not
+create a version. `CreateVersionForm` (`POST /prompts/{id}/versions`) is a
+separate form for content. The two are never combined.
+
+**Reason:** Reinforces "metadata update ≠ prompt-content version" at the
+interaction level, matching the schema (content lives in `versions`).
+
+---
+
+## Decision 44 — Token storage stays as Phase 3 decided (`localStorage`)
+
+**Decision:** Phase 4B does not change token handling. The access token stays in
+`localStorage`, sent as `Authorization: Bearer`; logout is client-side removal.
+
+**Reason:** Consistency with Phase 3 (Decision 31). The XSS trade-off and the
+production recommendation (HttpOnly cookie + CSRF) are unchanged and still
+documented there.
+
+---
+
+## Decision 45 — Lightweight frontend test setup: Vitest + React Testing Library
+
+**Decision:** Added `vitest`, `@vitejs/plugin-react`, `jsdom`, and
+`@testing-library/{react,dom,jest-dom,user-event}` as devDependencies, a
+`vitest.config.ts` (jsdom, `__tests__/**`), and `npm run test`. Tests mock
+`lib/api` and `lib/auth-context` — no backend, no real AI, no network. Test
+files are excluded from the Next `tsconfig` (`tsconfig.test.json` covers them
+for editors) so `next build` is unaffected.
+
+**Reason:** Vitest is the minimal modern option that works with the existing
+TS/ESM/Vite-style toolchain without a Babel/Jest config. A full browser
+E2E stack (Playwright) is deferred.
+
+---
+
 ## Non-decisions (still deferred)
 
 - pgvector, embedding storage, vector dimension, and vector index type — semantic-search phase.

@@ -233,3 +233,66 @@ recursive lineage / graph APIs, tags/collections management, dashboard, and all
 Phase 4B+ features.
 
 Full endpoint reference: `api.md`.
+
+## Phase 4B scope (done) — Prompt Library frontend
+
+```
+Browser (Next.js App Router, React, TypeScript, Tailwind)
+   │   fetch() with Authorization: Bearer <JWT from localStorage>
+   ▼
+lib/api.ts  — single client: NEXT_PUBLIC_API_BASE_URL, bearer header, JSON
+              parsing, ApiError + friendlyMessage()
+   ▼
+FastAPI  →  service  →  repository  →  PostgreSQL   (unchanged)
+```
+
+- **No backend or database change.** Frontend only.
+- **Auth state** (`lib/auth-context.tsx`): `status` is `loading` →
+  `authenticated` | `unauthenticated`. On mount it resolves the stored token via
+  `GET /auth/me`. `login`/`register` store the token and refetch the user.
+  `logout` clears the token + state and routes to `/login` (client-side only —
+  Phase 3 stateless JWT).
+- **Protected route group** `app/(app)/*` renders inside `<ProtectedShell>`:
+  spinner while `loading`, `router.replace("/login")` while `unauthenticated`,
+  the app shell (brand, nav, current user, logout) once `authenticated`. `/login`
+  and `/register` bounce to `/prompts` when already authenticated.
+- **Pages**: `/login`, `/register`, `/prompts` (library), `/prompts/new`,
+  `/prompts/[prompt_id]` (detail).
+- **Prompt Library**: calls `GET /api/v1/prompts` with `search` (lexical title),
+  `is_public` (All/Public/Private filter) and `limit`/`offset`; pagination uses
+  the backend `total`. No client-side filtering of a downloaded page.
+- **Prompt Detail**: `GET /api/v1/prompts/{id}` (metadata + current version) and
+  `GET /api/v1/prompts/{id}/versions` (history). Owner-only, in-page:
+  `PATCH /api/v1/prompts/{id}` (metadata) and
+  `POST /api/v1/prompts/{id}/versions` (`content` + `change_summary` only).
+  Historical versions render read-only with an "IMMUTABLE" marker and **no**
+  edit/delete controls anywhere. A single `parent_prompt_id` shows a "Derived
+  from" link (or "not accessible to you" on a 404).
+
+### Ownership / creator in the UI
+
+```
+Prompt.user_id      → the prompt's owner  → controls "Edit Metadata" and
+                      "Create New Version" visibility (backend enforces 403/404)
+Version.created_by  → who wrote that version → shown as "you" / "another user"
+```
+
+Hidden buttons are UX only. The FastAPI backend remains the sole authority for
+authentication, authorization, ownership, visibility, validation, version
+numbering, and version immutability.
+
+### Testing
+
+Vitest + React Testing Library (`frontend/__tests__/`, jsdom, `lib/api` and
+`lib/auth-context` mocked — no backend, no real AI). 18 tests: page render,
+list display, search-param wiring, pagination offset, detail loading/404,
+version history, owner vs non-owner controls, immutable-version controls,
+create-prompt payload, create-version payload, logout state.
+
+**Semantic search is not implemented yet. The current search is lexical title
+search backed by PostgreSQL (`ILIKE`).** No Neo4j, pgvector, embeddings,
+experiments, tags, or collections functionality exists.
+
+Explicitly **out of scope** for Phase 4B: everything in Phase 5+ (experiments UI,
+AI execution), semantic search, tags/collections/graph/analytics UI, prompt
+deletion UI.
