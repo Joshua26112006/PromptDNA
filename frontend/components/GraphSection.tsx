@@ -3,50 +3,70 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { friendlyMessage, getPromptGraph } from "@/lib/api";
+import { getPromptGraph } from "@/lib/api";
 import type { GraphRelationship, GraphResponse } from "@/lib/types";
 
-import { GitBranchIcon } from "./icons";
-import { card, Spinner } from "./ui";
+import { BranchIcon } from "./icons";
+import { EmptyState, focusRing, SectionCard, Skeleton } from "./ui";
 
-const ARROW: Record<string, string> = {
+const PHRASE: Record<string, string> = {
   DERIVED_FROM: "derived from",
   FORKED_FROM: "forked from",
   DEPENDS_ON: "depends on",
 };
 
-function RelRow({ r }: { r: GraphRelationship }) {
-  const label =
-    r.type && r.direction
-      ? r.direction === "outgoing"
-        ? `this prompt ${ARROW[r.type] ?? r.type} →`
-        : `← ${ARROW[r.type] ?? r.type} this prompt`
-      : (r.rel_types ?? []).join(" → ") || "connected";
+function phrase(type: string | null | undefined): string {
+  return (type && PHRASE[type]) || "linked to";
+}
+
+function RelPill({ children }: { children: React.ReactNode }) {
   return (
-    <li className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
-      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-800/60 dark:bg-indigo-950/40 dark:text-indigo-300">
-        {label}
-      </span>
-      <Link
-        href={`/prompts/${r.prompt_id}`}
-        className="font-medium text-neutral-800 underline decoration-neutral-300 underline-offset-2 hover:text-indigo-600 hover:decoration-indigo-400 dark:text-neutral-200 dark:hover:text-indigo-400"
-      >
-        {r.title}
-      </Link>
-      {r.depth > 1 && (
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">(depth {r.depth})</span>
+    <span className="rounded-full border border-accent-line bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-ink">
+      {children}
+    </span>
+  );
+}
+
+function PromptLink({ id, title }: { id: string; title: string }) {
+  return (
+    <Link
+      href={`/prompts/${id}`}
+      className={`rounded font-medium text-ink underline decoration-line-strong underline-offset-2 transition-colors hover:text-accent hover:decoration-accent ${focusRing}`}
+    >
+      {title}
+    </Link>
+  );
+}
+
+/** One hop, written as a sentence so the direction is unambiguous. */
+function ConnectionRow({ r }: { r: GraphRelationship }) {
+  const label = phrase(r.type ?? (r.rel_types ?? [])[0]);
+  const outgoing = r.direction !== "incoming";
+  return (
+    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-sm text-ink-muted">
+      {outgoing ? (
+        <>
+          <span>This prompt</span>
+          <RelPill>{label}</RelPill>
+          <PromptLink id={r.prompt_id} title={r.title} />
+        </>
+      ) : (
+        <>
+          <PromptLink id={r.prompt_id} title={r.title} />
+          <RelPill>{label}</RelPill>
+          <span>this prompt</span>
+        </>
       )}
     </li>
   );
 }
 
 /**
- * "Prompt Relationships (Knowledge Graph)" — Neo4j graph projection.
+ * Prompt Relationships — the Neo4j projection.
  *
- * Neo4j answers "how are these prompts explicitly connected?"
- * (derived / forked / depends-on) — distinct from semantic search, which finds
- * prompts with **similar meaning**. If the graph is unavailable, this section
- * degrades to a short message and never breaks the page.
+ * Deliberately framed against semantic search: this section only ever shows
+ * links that were *recorded* between prompts (lineage, forks, dependencies),
+ * never prompts that merely read similarly.
  */
 export function GraphSection({ promptId }: { promptId: string }) {
   const [related, setRelated] = useState<GraphResponse | null>(null);
@@ -65,12 +85,10 @@ export function GraphSection({ promptId }: { promptId: string }) {
         setRelated(rel);
         setAncestors(anc);
         setState("ok");
-      } catch (err) {
-        if (!cancelled) {
-          // 503 (Neo4j not enabled / unreachable) or any other error → soft fail
-          void friendlyMessage(err);
-          setState("unavailable");
-        }
+      } catch {
+        // 503 (graph disabled / unreachable) or any other failure: this section
+        // degrades on its own and never takes the page down with it.
+        if (!cancelled) setState("unavailable");
       }
     })();
     return () => {
@@ -78,60 +96,97 @@ export function GraphSection({ promptId }: { promptId: string }) {
     };
   }, [promptId]);
 
-  return (
-    <section aria-label="Prompt Relationships" className={`space-y-3 p-4 ${card}`}>
-      <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-        <GitBranchIcon className="h-4 w-4 text-neutral-400" />
-        Prompt Relationships (Knowledge Graph)
-      </h2>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        Explicit connections between prompts (derived / forked / depends‑on),
-        traversed in Neo4j. This is different from semantic search, which finds
-        prompts with <em>similar meaning</em>.
-      </p>
+  const lineage = [...(ancestors?.relationships ?? [])].sort((a, b) => b.depth - a.depth);
+  // A parent shows up in both traversals; showing it twice reads as a bug, so
+  // the lineage chain wins and "directly connected" lists only what it adds.
+  const inLineage = new Set(lineage.map((r) => r.prompt_id));
+  const connections = (related?.relationships ?? []).filter((r) => !inLineage.has(r.prompt_id));
+  const isolated = state === "ok" && lineage.length === 0 && connections.length === 0;
 
-      {state === "loading" && <Spinner label="Loading graph…" />}
+  return (
+    <SectionCard
+      title="Prompt Relationships"
+      ariaLabel="Prompt Relationships"
+      icon={BranchIcon}
+      description="Links that were explicitly recorded between prompts — derived from, forked from, depends on. This is different from semantic search, which finds prompts with similar meaning."
+    >
+      {state === "loading" && (
+        <div className="space-y-2" role="status" aria-live="polite">
+          <span className="sr-only">Loading graph…</span>
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-3 w-56" />
+        </div>
+      )}
+
       {state === "unavailable" && (
-        <p className="rounded-lg border border-dashed border-neutral-300 p-3 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-          Graph relationships unavailable.
+        <p className="rounded-lg border border-dashed border-line-strong px-3.5 py-3 text-sm text-ink-muted">
+          <span className="font-medium text-ink">Graph relationships unavailable.</span>{" "}
+          The knowledge graph isn&apos;t reachable right now. Everything else on this
+          page — versions, experiments and search — is unaffected.
         </p>
       )}
 
-      {state === "ok" && (
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Ancestry</p>
-            {ancestors && ancestors.relationships.length > 0 ? (
-              <ol className="mt-1 divide-y divide-neutral-100 dark:divide-neutral-800">
-                {ancestors.relationships.map((r) => (
-                  <RelRow key={`a-${r.prompt_id}`} r={r} />
-                ))}
-              </ol>
-            ) : (
-              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                No ancestor prompts — this prompt is a root.
-              </p>
-            )}
-          </div>
+      {isolated && (
+        <EmptyState
+          icon={BranchIcon}
+          title="This prompt stands alone"
+          description="No relationships have been recorded between this prompt and any other. Creating a prompt from an existing one links them here. Similar-sounding prompts won't appear — that's what Semantic Search is for."
+          compact
+        />
+      )}
 
-          <div>
-            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-              Directly connected
-            </p>
-            {related && related.relationships.length > 0 ? (
-              <ul className="mt-1 divide-y divide-neutral-100 dark:divide-neutral-800">
-                {related.relationships.map((r) => (
-                  <RelRow key={`r-${r.prompt_id}-${r.type}`} r={r} />
+      {state === "ok" && !isolated && (
+        <div className="space-y-5">
+          {lineage.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+                Lineage
+              </p>
+              <ol className="mt-2">
+                {lineage.map((r) => (
+                  <li key={`a-${r.prompt_id}`} className="relative pl-5">
+                    <span
+                      aria-hidden
+                      className="absolute bottom-0 left-[3px] top-4 w-px bg-line-strong"
+                    />
+                    <span
+                      aria-hidden
+                      className="absolute left-0 top-2 h-[7px] w-[7px] rounded-full border border-accent bg-panel"
+                    />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-3 text-sm">
+                      <PromptLink id={r.prompt_id} title={r.title} />
+                      <RelPill>{phrase((r.rel_types ?? [])[0])}</RelPill>
+                      {r.depth > 1 && (
+                        <span className="text-xs text-ink-subtle tnum">{r.depth} steps back</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+                <li className="relative pl-5">
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-2 h-[7px] w-[7px] rounded-full bg-accent"
+                  />
+                  <p className="text-sm font-medium text-ink">This prompt</p>
+                </li>
+              </ol>
+            </div>
+          )}
+
+          {connections.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+                Directly connected
+              </p>
+              <ul className="mt-1 divide-y divide-line">
+                {connections.map((r) => (
+                  <ConnectionRow key={`r-${r.prompt_id}-${r.type}`} r={r} />
                 ))}
               </ul>
-            ) : (
-              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                No connected prompts in the graph.
-              </p>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
-    </section>
+    </SectionCard>
   );
 }

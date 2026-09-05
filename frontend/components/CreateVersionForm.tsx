@@ -5,11 +5,20 @@ import { useState } from "react";
 import { createVersion, friendlyMessage } from "@/lib/api";
 import type { Version } from "@/lib/types";
 
-import { buttonPrimary, buttonSecondary, card, ErrorBox, TextAreaField, TextField } from "./ui";
+import { InfoIcon } from "./icons";
+import {
+  buttonPrimary,
+  buttonSecondary,
+  card,
+  ErrorBox,
+  Notice,
+  TextAreaField,
+  TextField,
+} from "./ui";
 
 /**
  * Owner-only. Submits `POST /api/v1/prompts/{id}/versions` with ONLY
- * `content` + `change_summary`. The backend assigns the version number and
+ * `content` + `change_summary`; the backend assigns the version number and
  * creator.
  */
 export function CreateVersionForm({
@@ -47,35 +56,38 @@ export function CreateVersionForm({
     <form
       onSubmit={onSubmit}
       aria-label="Create new version"
-      className={`space-y-3 p-4 ${card}`}
+      className={`space-y-4 p-4 sm:p-5 ${card}`}
     >
-      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-        Create new version
-      </h3>
+      <h3 className="text-sm font-semibold text-ink">Create new version</h3>
+
+      <Notice icon={InfoIcon}>
+        This adds a new version. Existing versions — and any experiments already
+        recorded against them — stay exactly as they are.
+      </Notice>
+
       <TextAreaField
         label="New prompt content"
         required
-        rows={8}
+        rows={12}
+        placeholder="The full text of the new version…"
         value={content}
         onChange={(e) => setContent(e.target.value)}
       />
       <TextField
         label="Change summary"
-        hint="Optional — a short note about what changed."
+        hint="Optional — a short note about what changed, shown in the version history."
+        placeholder="e.g. tightened the wording, added a persona"
         value={changeSummary}
         onChange={(e) => setChangeSummary(e.target.value)}
       />
+
       {error && <ErrorBox message={error} />}
-      <div className="flex gap-2">
+
+      <div className="flex flex-wrap gap-2">
         <button type="submit" className={buttonPrimary} disabled={busy}>
           {busy ? "Creating…" : "Create version"}
         </button>
-        <button
-          type="button"
-          className={buttonSecondary}
-          onClick={onCancel}
-          disabled={busy}
-        >
+        <button type="button" className={buttonSecondary} onClick={onCancel} disabled={busy}>
           Cancel
         </button>
       </div>

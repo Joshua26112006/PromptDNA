@@ -1,32 +1,126 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   PromptDNA design tokens
+   ---------------------------------------------------------------------------
+   Semantic tokens (surface / panel / line / ink / accent / status) are declared
+   as plain CSS variables so they can flip with `prefers-color-scheme`, then
+   exposed to Tailwind via `@theme inline` — which is what generates the
+   `bg-panel`, `text-ink-muted`, `border-line` … utilities used across the app.
+   Components reference the semantic name, never a raw palette step, so the
+   whole product re-themes from this one block.
+   =========================================================================== */
+
 :root {
-  --background: #fafafa;
-  --foreground: #171717;
+  /* surfaces */
+  --surface: #fbfbfd; /* page background */
+  --panel: #ffffff; /* raised cards / panels */
+  --panel-muted: #f5f6f9; /* inset areas: code, output, wells */
+  --line: #e6e8ee; /* hairlines, card borders */
+  --line-strong: #d2d7e0; /* emphasised dividers, input borders */
+
+  /* text */
+  --ink: #14161a; /* primary content */
+  --ink-muted: #5a6372; /* secondary / metadata */
+  --ink-subtle: #8b94a3; /* tertiary / placeholder */
+
+  /* brand accent — violet: reads technical/intelligent and stays clear of the
+     semantic green/amber/red used for status */
+  --accent: #6d28d9; /* accent text + icons on light surfaces */
+  --accent-solid: #6d28d9; /* filled buttons */
+  --accent-solid-hover: #5b21b6;
+  --accent-soft: #f3f0ff; /* tinted backgrounds */
+  --accent-line: #ddd4fb; /* borders on tinted backgrounds */
+  --accent-ink: #5b21b6; /* text on tinted backgrounds */
+
+  /* status */
+  --ok: #047857;
+  --ok-soft: #ecfdf5;
+  --ok-line: #a7f3d0;
+  --warn: #b45309;
+  --warn-soft: #fffbeb;
+  --warn-line: #fde68a;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+  --danger-line: #fecaca;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #0a0c10;
+    --panel: #13161c;
+    --panel-muted: #191d24;
+    --line: #262b34;
+    --line-strong: #333a45;
+
+    --ink: #e9edf4;
+    --ink-muted: #98a2b1;
+    --ink-subtle: #6a7381;
+
+    --accent: #a78bfa;
+    --accent-solid: #6d28d9;
+    --accent-solid-hover: #7c3aed;
+    --accent-soft: #1c1633;
+    --accent-line: #3b2f66;
+    --accent-ink: #c4b5fd;
+
+    --ok: #34d399;
+    --ok-soft: #062a20;
+    --ok-line: #10513c;
+    --warn: #fbbf24;
+    --warn-soft: #2a1e05;
+    --warn-line: #5a3f0a;
+    --danger: #f87171;
+    --danger-soft: #2b1112;
+    --danger-line: #5c1f22;
+  }
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-muted: var(--panel-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+
+  --color-accent: var(--accent);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-hover: var(--accent-solid-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--surface);
+  color: var(--ink);
   font-family: var(--font-sans);
 }
 
 ::selection {
-  background: color-mix(in srgb, #6366f1 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* Tabular figures for counts/durations/scores so numeric columns don't jitter. */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }

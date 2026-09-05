@@ -6,9 +6,18 @@ import { friendlyMessage, listPromptExperiments } from "@/lib/api";
 import type { Experiment } from "@/lib/types";
 
 import { ExperimentStatusBadge } from "./ExperimentStatusBadge";
-import { BeakerIcon, InboxIcon } from "./icons";
+import { BeakerIcon } from "./icons";
 import { RunExperimentForm } from "./RunExperimentForm";
-import { buttonPrimary, card, ErrorBox, formatDate, Spinner } from "./ui";
+import {
+  buttonPrimary,
+  Chip,
+  EmptyState,
+  ErrorBox,
+  formatDate,
+  SectionCard,
+  Skeleton,
+  well,
+} from "./ui";
 
 function scoreLabel(score: Experiment["score"]): string {
   if (score === null || score === undefined) return "Not scored";
@@ -17,73 +26,74 @@ function scoreLabel(score: Experiment["score"]): string {
 
 function ExperimentRow({ e }: { e: Experiment }) {
   return (
-    <li className={`p-3.5 ${card}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+    <li className="py-4 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ExperimentStatusBadge status={e.status} />
-          <span className="text-sm font-medium">{e.model_name}</span>
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">({e.provider})</span>
+          <span className="text-sm font-medium text-ink">{e.model_name}</span>
+          <Chip>{e.provider}</Chip>
         </div>
-        <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
-          Version {e.version_number}
-        </span>
+        <Chip mono>v{e.version_number}</Chip>
       </div>
 
-      <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+      <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
         <div>
-          <dt className="inline">Response time: </dt>
-          <dd className="inline">
-            {e.response_time_ms === null
-              ? "—"
-              : `${(e.response_time_ms / 1000).toFixed(2)}s`}
+          <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Response time</dt>
+          <dd className="mt-0.5 font-mono text-sm text-ink tnum">
+            {e.response_time_ms === null ? "—" : `${(e.response_time_ms / 1000).toFixed(2)}s`}
           </dd>
         </div>
         <div>
-          <dt className="inline">Score: </dt>
-          <dd className="inline">{scoreLabel(e.score)}</dd>
+          <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Score</dt>
+          <dd className="mt-0.5 text-sm text-ink tnum">{scoreLabel(e.score)}</dd>
         </div>
         <div>
-          <dt className="inline">Executed: </dt>
-          <dd className="inline">{formatDate(e.executed_at)}</dd>
+          <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Executed</dt>
+          <dd className="mt-0.5 text-sm text-ink">{formatDate(e.executed_at)}</dd>
         </div>
       </dl>
 
       {e.status === "FAILED" && e.error_message && (
-        <p className="mt-2 text-xs text-red-700 dark:text-red-300">
-          Error: {e.error_message}
+        <p className="mt-3 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-xs leading-relaxed text-danger">
+          {e.error_message}
         </p>
       )}
+
       {e.status === "SUCCESS" && e.output && (
-        <div className="mt-2">
-          <p className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-            Output
-          </p>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-neutral-100 bg-neutral-50 p-2 font-mono text-xs dark:border-neutral-800/60 dark:bg-neutral-950">
-{e.output}
-          </pre>
+        <div className="mt-3">
+          <p className="mb-1.5 text-[11px] uppercase tracking-wide text-ink-subtle">Model output</p>
+          <pre className={`max-h-64 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed text-ink ${well}`}>{e.output}</pre>
         </div>
       )}
+
       {e.notes && (
-        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Notes: {e.notes}</p>
+        <p className="mt-3 text-xs text-ink-muted">
+          <span className="text-ink-subtle">Notes: </span>
+          {e.notes}
+        </p>
       )}
     </li>
   );
 }
 
 /**
- * Experiment history + (owner only) "Run Experiment" against a chosen version.
- * Backend enforces owner-only execution regardless of what the UI shows.
+ * Experiment history + (owner only) "Run Experiment" against the current
+ * version. The backend enforces owner-only execution regardless of what the UI
+ * chooses to show.
  */
 export function ExperimentSection({
   promptId,
   isOwner,
   currentVersionId,
   currentVersionNumber,
+  onCountChange,
 }: {
   promptId: string;
   isOwner: boolean;
   currentVersionId: string | null;
   currentVersionNumber: number | null;
+  /** reports the loaded experiment count so the page header can show it */
+  onCountChange?: (count: number) => void;
 }) {
   const [experiments, setExperiments] = useState<Experiment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +105,10 @@ export function ExperimentSection({
     (async () => {
       try {
         const res = await listPromptExperiments(promptId);
-        if (!cancelled) setExperiments(res.items);
+        if (!cancelled) {
+          setExperiments(res.items);
+          onCountChange?.(res.items.length);
+        }
       } catch (err) {
         if (!cancelled) setError(friendlyMessage(err));
       }
@@ -103,61 +116,71 @@ export function ExperimentSection({
     return () => {
       cancelled = true;
     };
+    // `onCountChange` is a reporting callback; re-fetching when its identity
+    // changes would loop against a parent that recreates it each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptId, reloadKey]);
 
+  const canRun = isOwner && currentVersionId && currentVersionNumber !== null;
+
   return (
-    <section aria-label="Experiments" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-          <BeakerIcon className="h-4 w-4 text-neutral-400" />
-          Experiments
-        </h2>
-        {isOwner && currentVersionId && !showForm && (
-          <button
-            type="button"
-            className={buttonPrimary}
-            onClick={() => setShowForm(true)}
-          >
+    <SectionCard
+      title="Experiments"
+      icon={BeakerIcon}
+      description="An experiment sends one immutable version's exact text to a model and stores what came back — the output, how long it took, and whether it succeeded."
+      actions={
+        canRun && !showForm ? (
+          <button type="button" className={buttonPrimary} onClick={() => setShowForm(true)}>
             Run Experiment
           </button>
+        ) : undefined
+      }
+    >
+      <div className="space-y-3">
+        {canRun && showForm && (
+          <RunExperimentForm
+            promptId={promptId}
+            versionId={currentVersionId}
+            versionNumber={currentVersionNumber}
+            onCancel={() => setShowForm(false)}
+            onComplete={() => {
+              setShowForm(false);
+              setReloadKey((k) => k + 1);
+            }}
+          />
+        )}
+
+        {error && <ErrorBox message={error} />}
+
+        {experiments === null && !error && (
+          <div className="space-y-3 py-2">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-64" />
+            <Skeleton className="h-3 w-52" />
+          </div>
+        )}
+
+        {experiments !== null && experiments.length === 0 && (
+          <EmptyState
+            icon={BeakerIcon}
+            title="No experiments yet"
+            description={
+              isOwner
+                ? "Run this prompt against a model to record its output, response time and status. Results stay attached to the exact version they ran against, so you can compare versions fairly."
+                : "The owner hasn't recorded any model runs for this prompt yet."
+            }
+            compact
+          />
+        )}
+
+        {experiments !== null && experiments.length > 0 && (
+          <ul className="divide-y divide-line">
+            {experiments.map((e) => (
+              <ExperimentRow key={e.experiment_id} e={e} />
+            ))}
+          </ul>
         )}
       </div>
-
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        An experiment runs a specific immutable version&apos;s content against a
-        model and stores the result for comparison.
-      </p>
-
-      {isOwner && showForm && currentVersionId && currentVersionNumber !== null && (
-        <RunExperimentForm
-          promptId={promptId}
-          versionId={currentVersionId}
-          versionNumber={currentVersionNumber}
-          onCancel={() => setShowForm(false)}
-          onComplete={() => {
-            setShowForm(false);
-            setReloadKey((k) => k + 1);
-          }}
-        />
-      )}
-
-      {error && <ErrorBox message={error} />}
-      {experiments === null && !error && <Spinner label="Loading experiments…" />}
-
-      {experiments !== null && experiments.length === 0 && (
-        <p className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-          <InboxIcon className="h-5 w-5 text-neutral-400" />
-          No experiments yet.
-        </p>
-      )}
-
-      {experiments !== null && experiments.length > 0 && (
-        <ul className="space-y-2">
-          {experiments.map((e) => (
-            <ExperimentRow key={e.experiment_id} e={e} />
-          ))}
-        </ul>
-      )}
-    </section>
+    </SectionCard>
   );
 }

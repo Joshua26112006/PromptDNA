@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import { buttonPrimary, card, ErrorBox, InfoNote, TextField } from "@/components/ui";
+import { AuthLayout } from "@/components/AuthLayout";
+import { buttonPrimary, ErrorBox, InfoNote, TextField, focusRing } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -47,34 +48,24 @@ function LoginForm() {
   }
 
   return (
-    <main className="relative flex flex-1 items-center justify-center overflow-hidden p-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,#e0e7ff,transparent_45%),radial-gradient(circle_at_80%_0%,#eef2ff,transparent_40%)] dark:bg-[radial-gradient(circle_at_20%_20%,rgba(30,27,75,0.4),transparent_45%),radial-gradient(circle_at_80%_0%,rgba(49,46,129,0.25),transparent_40%)]"
-      />
-      <form
-        onSubmit={onSubmit}
-        className={`w-full max-w-sm space-y-4 p-7 ${card}`}
-        aria-labelledby="login-heading"
-      >
-        <div className="flex items-center gap-2">
-          <span
-            aria-hidden
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white shadow-sm"
-          >
-            P
-          </span>
-          <h1 id="login-heading" className="text-xl font-semibold">
-            Log in to PromptDNA
-          </h1>
-        </div>
+    <form onSubmit={onSubmit} className="space-y-5" aria-labelledby="login-heading">
+      <div>
+        <h1 id="login-heading" className="text-2xl font-semibold tracking-tight text-ink">
+          Log in to PromptDNA
+        </h1>
+        <p className="mt-1.5 text-sm text-ink-muted">
+          Pick up where you left off with your prompt library.
+        </p>
+      </div>
 
-        {expired && <InfoNote>Your session has expired. Please log in again.</InfoNote>}
+      {expired && <InfoNote>Your session has expired. Please log in again.</InfoNote>}
 
+      <div className="space-y-4">
         <TextField
           label="Email"
           type="email"
           autoComplete="email"
+          placeholder="you@example.com"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -83,32 +74,38 @@ function LoginForm() {
           label="Password"
           type="password"
           autoComplete="current-password"
+          placeholder="••••••••"
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
+      </div>
 
-        {error && <ErrorBox message={error} />}
+      {error && <ErrorBox message={error} />}
 
-        <button type="submit" disabled={busy} className={`w-full ${buttonPrimary}`}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
+      <button type="submit" disabled={busy} className={`w-full ${buttonPrimary}`}>
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
 
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          No account?{" "}
-          <Link href="/register" className="underline">
-            Create an account
-          </Link>
-        </p>
-      </form>
-    </main>
+      <p className="text-sm text-ink-muted">
+        No account?{" "}
+        <Link
+          href="/register"
+          className={`rounded font-medium text-accent underline underline-offset-2 ${focusRing}`}
+        >
+          Create an account
+        </Link>
+      </p>
+    </form>
   );
 }
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
+    <AuthLayout>
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
+    </AuthLayout>
   );
 }

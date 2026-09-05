@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { Wordmark } from "@/components/Wordmark";
 import { Spinner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
@@ -17,7 +18,8 @@ export default function Home() {
   }, [status, router]);
 
   return (
-    <main className="flex flex-1 items-center justify-center p-8">
+    <main className="flex flex-1 flex-col items-center justify-center gap-5 p-8">
+      <Wordmark size="lg" />
       <Spinner label="Loading PromptDNA…" />
     </main>
   );

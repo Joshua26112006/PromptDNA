@@ -7,69 +7,93 @@ import type { ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 
 import { LogOutIcon } from "./icons";
-import { buttonSecondary } from "./ui";
+import { Wordmark } from "./Wordmark";
+import { buttonSecondary, focusRing } from "./ui";
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const chars = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "");
-  return chars.join("") || "?";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((p) => p[0]!.toUpperCase()).join("") || "?";
 }
+
+const NAV = [{ href: "/prompts", label: "Library" }];
 
 /** Header + main region for authenticated pages. */
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
-  const pathname = usePathname();
-  const onLibrary = pathname?.startsWith("/prompts");
+  const pathname = usePathname() ?? "";
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 border-b border-neutral-200 bg-white/80 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-950/80">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-6">
-            <Link href="/prompts" className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-xs font-bold text-white shadow-sm"
-              >
-                P
-              </span>
-              <span className="font-semibold tracking-tight">PromptDNA</span>
-            </Link>
-            <nav aria-label="Primary">
-              <Link
-                href="/prompts"
-                aria-current={onLibrary ? "page" : undefined}
-                className={
-                  onLibrary
-                    ? "text-sm font-medium text-indigo-600 dark:text-indigo-400"
-                    : "text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                }
-              >
-                Prompt Library
-              </Link>
-            </nav>
-          </div>
-          <div className="flex items-center gap-3 text-sm">
+      <a
+        href="#main"
+        className={`sr-only rounded-lg bg-panel px-4 py-2 text-sm font-medium text-ink shadow focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 ${focusRing}`}
+      >
+        Skip to content
+      </a>
+
+      <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+          <Link href="/prompts" className={`rounded-lg ${focusRing}`} aria-label="PromptDNA home">
+            <Wordmark />
+          </Link>
+
+          <nav aria-label="Primary" className="flex items-center gap-1">
+            {NAV.map((item) => {
+              const active = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-lg px-2.5 py-1.5 text-sm transition ${focusRing} ${
+                    active
+                      ? "bg-accent-soft font-medium text-accent-ink"
+                      : "text-ink-muted hover:bg-panel-muted hover:text-ink"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="ml-auto flex items-center gap-3">
             {user && (
               <span className="hidden items-center gap-2 sm:flex" title={user.email}>
                 <span
                   aria-hidden
-                  className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-semibold text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent-ink ring-1 ring-accent-line"
                 >
                   {initials(user.name)}
                 </span>
-                <span className="text-neutral-500 dark:text-neutral-400">{user.name}</span>
+                <span className="max-w-[12ch] truncate text-sm text-ink-muted">{user.name}</span>
               </span>
             )}
             <button type="button" onClick={logout} className={buttonSecondary}>
               <LogOutIcon className="h-3.5 w-3.5" />
-              Log out
+              <span className="hidden sm:inline">Log out</span>
+              <span className="sr-only sm:hidden">Log out</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
+        {children}
+      </main>
+
+      <footer className="border-t border-line">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-ink-subtle sm:px-6">
+          <span>PromptDNA — prompt lineage, experiments and retrieval.</span>
+          <span className="flex items-center gap-1.5">
+            <span>PostgreSQL</span>
+            <span aria-hidden>·</span>
+            <span>pgvector</span>
+            <span aria-hidden>·</span>
+            <span>Neo4j</span>
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

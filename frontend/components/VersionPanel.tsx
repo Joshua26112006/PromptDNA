@@ -1,8 +1,13 @@
 import type { Version } from "@/lib/types";
 
-import { card, formatDate } from "./ui";
+import { LockIcon } from "./icons";
+import { card, formatDate, well } from "./ui";
 
-/** Read-only display of a single version. Content is never editable here. */
+/**
+ * Read-only view of one version. Content is never editable here and this panel
+ * intentionally contains no controls — a version, once written, is a fixed
+ * historical record.
+ */
 export function VersionPanel({
   version,
   isCurrent,
@@ -14,54 +19,56 @@ export function VersionPanel({
 }) {
   return (
     <section aria-label={`Version ${version.version_number} details`} className={card}>
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2.5 dark:border-neutral-800">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-            {isCurrent ? "Current version" : "Historical version"}
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-mono text-sm font-semibold text-ink tnum">
+            Version {version.version_number}
+          </h2>
+          {isCurrent && (
+            <span className="rounded-full border border-accent-line bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-ink">
+              Latest
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-full border border-line bg-panel-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+            <LockIcon className="h-3 w-3" />
+            Immutable
           </span>
-          <span className="font-mono text-sm">Version {version.version_number}</span>
         </div>
-        <span
-          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-            isCurrent
-              ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800/60 dark:bg-indigo-950/40 dark:text-indigo-300"
-              : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300"
-          }`}
-        >
-          {isCurrent ? "LATEST" : "IMMUTABLE"}
-        </span>
+        <p className="text-xs text-ink-subtle">
+          {isCurrent ? "Newest version of this prompt" : "An earlier version, kept for comparison"}
+        </p>
       </header>
 
-      <div className="space-y-3 p-4">
+      <div className="space-y-4 p-4 sm:p-5">
         <div>
-          <p className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-subtle">
             Prompt content
           </p>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-neutral-100 bg-neutral-50 p-3 font-mono text-sm dark:border-neutral-800/60 dark:bg-neutral-950">
-{version.content}
-          </pre>
+          <pre className={`max-h-[28rem] overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-sm leading-relaxed text-ink ${well}`}>{version.content}</pre>
         </div>
 
-        <dl className="grid grid-cols-1 gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:grid-cols-2">
-          <div>
-            <dt className="inline font-medium">Change summary: </dt>
-            <dd className="inline">{version.change_summary ?? "—"}</dd>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line pt-4 sm:grid-cols-3">
+          <div className="col-span-2 sm:col-span-1">
+            <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Change summary</dt>
+            <dd className="mt-0.5 text-sm text-ink">{version.change_summary ?? "—"}</dd>
           </div>
           <div>
-            <dt className="inline font-medium">Created: </dt>
-            <dd className="inline">{formatDate(version.created_at)}</dd>
+            <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Created</dt>
+            <dd className="mt-0.5 text-sm text-ink">{formatDate(version.created_at)}</dd>
           </div>
           <div>
-            <dt className="inline font-medium">Created by: </dt>
-            <dd className="inline">{creatorIsViewer ? "you" : "another user"}</dd>
+            <dt className="text-[11px] uppercase tracking-wide text-ink-subtle">Created by</dt>
+            <dd className="mt-0.5 text-sm text-ink">
+              {creatorIsViewer ? "You" : "Another user"}
+            </dd>
           </div>
         </dl>
 
-        {!isCurrent && (
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Historical versions are immutable — they cannot be edited or deleted.
-          </p>
-        )}
+        <p className="text-xs leading-relaxed text-ink-muted">
+          Versions are immutable — this text can never be edited or deleted. Changing
+          the prompt creates a new version instead, so every experiment stays tied to
+          the exact wording it ran against.
+        </p>
       </div>
     </section>
   );

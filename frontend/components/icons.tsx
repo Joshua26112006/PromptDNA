@@ -1,5 +1,6 @@
-// Tiny inline icon set (no icon library dependency). Always decorative —
-// paired with a visible text label, so every icon is aria-hidden.
+// Hand-rolled inline SVG icon set — no icon-library dependency.
+// Icons are decorative and always paired with a visible text label, so every
+// one is aria-hidden. Sized by the caller via className.
 
 import type { SVGProps } from "react";
 
@@ -18,6 +19,21 @@ function base(props: IconProps) {
     focusable: false,
     ...props,
   };
+}
+
+/**
+ * PromptDNA mark — two strands with connecting rungs. A geometric abstraction
+ * of a helix that reads as "lineage / evolution" at 20-32px, not a biology
+ * illustration.
+ */
+export function LogoMark(props: IconProps) {
+  return (
+    <svg {...base(props)} strokeWidth={1.9}>
+      <path d="M8 3c0 4.2 8 5 8 9s-8 4.8-8 9" />
+      <path d="M16 3c0 4.2-8 5-8 9s8 4.8 8 9" />
+      <path d="M9.1 7.2h5.8M9.1 16.8h5.8" />
+    </svg>
+  );
 }
 
 export function GlobeIcon(props: IconProps) {
@@ -47,6 +63,14 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
+export function SparklesIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.1 2.1M15.6 15.6l2.1 2.1M17.7 6.3l-2.1 2.1M8.4 15.6l-2.1 2.1" />
+    </svg>
+  );
+}
+
 export function PlusIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
@@ -59,6 +83,14 @@ export function ArrowLeftIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
       <path d="M19 12H5M11 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 12h14M13 6l6 6-6 6" />
     </svg>
   );
 }
@@ -87,15 +119,8 @@ export function LogOutIcon(props: IconProps) {
   );
 }
 
-export function SparklesIcon(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.1 2.1M15.6 15.6l2.1 2.1M17.7 6.3l-2.1 2.1M8.4 15.6l-2.1 2.1" />
-    </svg>
-  );
-}
-
-export function GitBranchIcon(props: IconProps) {
+/** Relationship / lineage glyph: nodes joined by a branch. */
+export function BranchIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
       <circle cx="6" cy="5" r="2.25" />
@@ -151,11 +176,38 @@ export function BeakerIcon(props: IconProps) {
   );
 }
 
-export function InboxIcon(props: IconProps) {
+export function FileTextIcon(props: IconProps) {
   return (
     <svg {...base(props)}>
-      <path d="M4 12h4l2 3h4l2-3h4" />
-      <path d="M5.5 5h13l2.5 7v6a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-6l2-7Z" />
+      <path d="M14 3H7a1.8 1.8 0 0 0-1.8 1.8v14.4A1.8 1.8 0 0 0 7 21h10a1.8 1.8 0 0 0 1.8-1.8V8L14 3Z" />
+      <path d="M13.8 3.2V8H18.6M8.5 13h7M8.5 16.5h4.5" />
+    </svg>
+  );
+}
+
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10.7 4.2 3.2 17.3A1.5 1.5 0 0 0 4.5 19.6h15a1.5 1.5 0 0 0 1.3-2.3L13.3 4.2a1.5 1.5 0 0 0-2.6 0Z" />
+      <path d="M12 9.5v4M12 16.6h.01" />
+    </svg>
+  );
+}
+
+export function InfoIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8h.01" />
+    </svg>
+  );
+}
+
+export function UserIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="8.5" r="3.75" />
+      <path d="M4.8 20a7.4 7.4 0 0 1 14.4 0" />
     </svg>
   );
 }
