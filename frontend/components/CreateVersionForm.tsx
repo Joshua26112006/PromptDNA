@@ -5,7 +5,7 @@ import { useState } from "react";
 import { createVersion, friendlyMessage } from "@/lib/api";
 import type { Version } from "@/lib/types";
 
-import { buttonPrimary, buttonSecondary, ErrorBox, TextAreaField, TextField } from "./ui";
+import { buttonPrimary, buttonSecondary, card, ErrorBox, TextAreaField, TextField } from "./ui";
 
 /**
  * Owner-only. Submits `POST /api/v1/prompts/{id}/versions` with ONLY
@@ -47,9 +47,11 @@ export function CreateVersionForm({
     <form
       onSubmit={onSubmit}
       aria-label="Create new version"
-      className="space-y-3 rounded border border-neutral-300 p-4 dark:border-neutral-700"
+      className={`space-y-3 p-4 ${card}`}
     >
-      <h3 className="text-sm font-semibold">Create new version</h3>
+      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+        Create new version
+      </h3>
       <TextAreaField
         label="New prompt content"
         required

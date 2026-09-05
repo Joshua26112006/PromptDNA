@@ -8,6 +8,7 @@ import { CreateVersionForm } from "@/components/CreateVersionForm";
 import { EditMetadataForm } from "@/components/EditMetadataForm";
 import { ExperimentSection } from "@/components/ExperimentSection";
 import { GraphSection } from "@/components/GraphSection";
+import { ArrowLeftIcon } from "@/components/icons";
 import { buttonPrimary, buttonSecondary, ErrorBox, formatDate, Spinner } from "@/components/ui";
 import { VersionHistory } from "@/components/VersionHistory";
 import { VersionPanel } from "@/components/VersionPanel";
@@ -141,14 +142,20 @@ export default function PromptDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/prompts" className="text-sm text-neutral-500 hover:underline">
-        ← Back to Prompt Library
+      <Link
+        href="/prompts"
+        className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-800 hover:underline dark:hover:text-neutral-200"
+      >
+        <ArrowLeftIcon className="h-3.5 w-3.5" />
+        Back to Prompt Library
       </Link>
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">{prompt.title}</h1>
+            <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50">
+              {prompt.title}
+            </h1>
             <VisibilityBadge isPublic={prompt.is_public} />
           </div>
           {isOwner && mode === "view" && (
@@ -177,7 +184,7 @@ export default function PromptDetailPage() {
           </p>
         )}
 
-        <dl className="grid grid-cols-1 gap-1 text-xs text-neutral-500 sm:grid-cols-2">
+        <dl className="grid grid-cols-1 gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:grid-cols-2">
           <div>
             <dt className="inline font-medium">Purpose: </dt>
             <dd className="inline">{prompt.purpose ?? "—"}</dd>

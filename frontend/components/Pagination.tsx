@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 import { buttonSecondary } from "./ui";
 
 interface PaginationProps {
@@ -17,7 +18,7 @@ export function Pagination({ offset, limit, total, onChange }: PaginationProps) 
 
   return (
     <nav
-      className="flex items-center justify-between gap-3 text-sm"
+      className="flex items-center justify-between gap-3 pt-1 text-sm"
       aria-label="Pagination"
     >
       <button
@@ -26,11 +27,12 @@ export function Pagination({ offset, limit, total, onChange }: PaginationProps) 
         onClick={() => onChange(Math.max(0, offset - limit))}
         disabled={!hasPrev}
       >
-        ← Previous
+        <ChevronLeftIcon className="h-3.5 w-3.5" />
+        Previous
       </button>
-      <span className="text-neutral-500" aria-live="polite">
+      <span className="text-neutral-500 dark:text-neutral-400" aria-live="polite">
         Page {page} of {pageCount}
-        <span className="ml-2 text-neutral-400">({total} total)</span>
+        <span className="ml-2 text-neutral-400 dark:text-neutral-600">({total} total)</span>
       </span>
       <button
         type="button"
@@ -38,7 +40,8 @@ export function Pagination({ offset, limit, total, onChange }: PaginationProps) 
         onClick={() => onChange(offset + limit)}
         disabled={!hasNext}
       >
-        Next →
+        Next
+        <ChevronRightIcon className="h-3.5 w-3.5" />
       </button>
     </nav>
   );

@@ -6,8 +6,9 @@ import { friendlyMessage, listPromptExperiments } from "@/lib/api";
 import type { Experiment } from "@/lib/types";
 
 import { ExperimentStatusBadge } from "./ExperimentStatusBadge";
+import { BeakerIcon, InboxIcon } from "./icons";
 import { RunExperimentForm } from "./RunExperimentForm";
-import { buttonPrimary, ErrorBox, formatDate, Spinner } from "./ui";
+import { buttonPrimary, card, ErrorBox, formatDate, Spinner } from "./ui";
 
 function scoreLabel(score: Experiment["score"]): string {
   if (score === null || score === undefined) return "Not scored";
@@ -16,19 +17,19 @@ function scoreLabel(score: Experiment["score"]): string {
 
 function ExperimentRow({ e }: { e: Experiment }) {
   return (
-    <li className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
+    <li className={`p-3.5 ${card}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <ExperimentStatusBadge status={e.status} />
           <span className="text-sm font-medium">{e.model_name}</span>
-          <span className="text-xs text-neutral-500">({e.provider})</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">({e.provider})</span>
         </div>
-        <span className="font-mono text-xs text-neutral-500">
+        <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
           Version {e.version_number}
         </span>
       </div>
 
-      <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">
+      <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
         <div>
           <dt className="inline">Response time: </dt>
           <dd className="inline">
@@ -54,14 +55,16 @@ function ExperimentRow({ e }: { e: Experiment }) {
       )}
       {e.status === "SUCCESS" && e.output && (
         <div className="mt-2">
-          <p className="mb-1 text-xs font-medium text-neutral-500">Output</p>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 font-mono text-xs dark:bg-neutral-900">
+          <p className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+            Output
+          </p>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-neutral-100 bg-neutral-50 p-2 font-mono text-xs dark:border-neutral-800/60 dark:bg-neutral-950">
 {e.output}
           </pre>
         </div>
       )}
       {e.notes && (
-        <p className="mt-2 text-xs text-neutral-500">Notes: {e.notes}</p>
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Notes: {e.notes}</p>
       )}
     </li>
   );
@@ -105,7 +108,10 @@ export function ExperimentSection({
   return (
     <section aria-label="Experiments" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Experiments</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          <BeakerIcon className="h-4 w-4 text-neutral-400" />
+          Experiments
+        </h2>
         {isOwner && currentVersionId && !showForm && (
           <button
             type="button"
@@ -117,7 +123,7 @@ export function ExperimentSection({
         )}
       </div>
 
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
         An experiment runs a specific immutable version&apos;s content against a
         model and stores the result for comparison.
       </p>
@@ -139,7 +145,8 @@ export function ExperimentSection({
       {experiments === null && !error && <Spinner label="Loading experiments…" />}
 
       {experiments !== null && experiments.length === 0 && (
-        <p className="rounded border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-500 dark:border-neutral-700">
+        <p className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+          <InboxIcon className="h-5 w-5 text-neutral-400" />
           No experiments yet.
         </p>
       )}

@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { ArrowLeftIcon } from "@/components/icons";
 import {
   buttonPrimary,
   buttonSecondary,
+  card,
   ErrorBox,
   TextAreaField,
   TextField,
@@ -45,17 +47,27 @@ export default function NewPromptPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div>
-        <Link href="/prompts" className="text-sm text-neutral-500 hover:underline">
-          ← Back to Prompt Library
+        <Link
+          href="/prompts"
+          className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-800 hover:underline dark:hover:text-neutral-200"
+        >
+          <ArrowLeftIcon className="h-3.5 w-3.5" />
+          Back to Prompt Library
         </Link>
-        <h1 className="mt-1 text-xl font-semibold">New Prompt</h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <h1 className="mt-2 text-xl font-semibold text-neutral-900 dark:text-neutral-50">
+          New Prompt
+        </h1>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Creating a prompt also creates its <strong>Version 1</strong> from the
           content below. The prompt is owned by you.
         </p>
       </div>
 
-      <form onSubmit={onSubmit} aria-label="Create prompt" className="space-y-4">
+      <form
+        onSubmit={onSubmit}
+        aria-label="Create prompt"
+        className={`space-y-4 p-5 ${card}`}
+      >
         <TextField
           label="Title"
           required
@@ -86,26 +98,32 @@ export default function NewPromptPage() {
           onChange={(e) => setContent(e.target.value)}
         />
 
-        <fieldset>
-          <legend className="text-sm font-medium">Visibility</legend>
-          <label className="mr-4 inline-flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="visibility"
-              checked={!isPublic}
-              onChange={() => setIsPublic(false)}
-            />
-            Private
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="visibility"
-              checked={isPublic}
-              onChange={() => setIsPublic(true)}
-            />
-            Public
-          </label>
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+            Visibility
+          </legend>
+          <div className="flex gap-4">
+            <label className="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+              <input
+                type="radio"
+                name="visibility"
+                checked={!isPublic}
+                onChange={() => setIsPublic(false)}
+                className="accent-indigo-600"
+              />
+              Private
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+              <input
+                type="radio"
+                name="visibility"
+                checked={isPublic}
+                onChange={() => setIsPublic(true)}
+                className="accent-indigo-600"
+              />
+              Public
+            </label>
+          </div>
         </fieldset>
 
         {error && <ErrorBox message={error} />}

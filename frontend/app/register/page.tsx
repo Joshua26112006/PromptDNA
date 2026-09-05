@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { buttonPrimary, ErrorBox, TextField } from "@/components/ui";
+import { buttonPrimary, card, ErrorBox, TextField } from "@/components/ui";
 import { ApiError, friendlyMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -52,11 +52,27 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-8">
-      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4" aria-labelledby="register-heading">
-        <h1 id="register-heading" className="text-2xl font-semibold">
-          Create your account
-        </h1>
+    <main className="relative flex flex-1 items-center justify-center overflow-hidden p-8">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,#e0e7ff,transparent_45%),radial-gradient(circle_at_80%_0%,#eef2ff,transparent_40%)] dark:bg-[radial-gradient(circle_at_20%_20%,rgba(30,27,75,0.4),transparent_45%),radial-gradient(circle_at_80%_0%,rgba(49,46,129,0.25),transparent_40%)]"
+      />
+      <form
+        onSubmit={onSubmit}
+        className={`w-full max-w-sm space-y-4 p-7 ${card}`}
+        aria-labelledby="register-heading"
+      >
+        <div className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white shadow-sm"
+          >
+            P
+          </span>
+          <h1 id="register-heading" className="text-xl font-semibold">
+            Create your account
+          </h1>
+        </div>
 
         <TextField
           label="Name"

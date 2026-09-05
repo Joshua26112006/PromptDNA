@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { friendlyMessage, listModels, runExperiment } from "@/lib/api";
 import type { Experiment, Model } from "@/lib/types";
 
-import { buttonPrimary, buttonSecondary, ErrorBox, Spinner } from "./ui";
+import { buttonPrimary, buttonSecondary, card, ErrorBox, Spinner, TextField } from "./ui";
 
 /**
  * Owner-only. Runs `POST .../versions/{versionId}/experiments` with only
@@ -73,15 +73,15 @@ export function RunExperimentForm({
     <form
       onSubmit={onSubmit}
       aria-label="Run experiment"
-      className="space-y-3 rounded border border-neutral-300 p-4 dark:border-neutral-700"
+      className={`space-y-3 p-4 ${card}`}
     >
       <div className="flex items-center gap-2">
         <h3 className="text-sm font-semibold">Run Experiment</h3>
-        <span className="font-mono text-xs text-neutral-500">
+        <span className="rounded-full border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 font-mono text-xs text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400">
           Version {versionNumber}
         </span>
       </div>
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
         This runs <strong>Version {versionNumber}</strong>&apos;s exact content
         against the selected model and records the result.
       </p>
@@ -89,15 +89,15 @@ export function RunExperimentForm({
       {models === null ? (
         <Spinner label="Loading models…" />
       ) : (
-        <div className="space-y-1">
-          <label htmlFor="exp-model" className="block text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="exp-model" className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
             Model
           </label>
           <select
             id="exp-model"
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
-            className="w-full rounded border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-neutral-700 dark:bg-neutral-900"
           >
             <option value="">Select a model…</option>
             {models.map((m) => (
@@ -114,18 +114,13 @@ export function RunExperimentForm({
         </div>
       )}
 
-      <div className="space-y-1">
-        <label htmlFor="exp-notes" className="block text-sm font-medium">
-          Notes
-        </label>
-        <input
-          id="exp-notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          className="w-full rounded border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
-          placeholder="Optional"
-        />
-      </div>
+      <TextField
+        id="exp-notes"
+        label="Notes"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Optional"
+      />
 
       {running && <Spinner label="Running experiment…" />}
       {error && <ErrorBox message={error} />}

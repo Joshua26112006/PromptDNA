@@ -8,6 +8,7 @@ import type { Prompt, PromptMetadataPayload } from "@/lib/types";
 import {
   buttonPrimary,
   buttonSecondary,
+  card,
   ErrorBox,
   InfoNote,
   TextAreaField,
@@ -58,9 +59,11 @@ export function EditMetadataForm({
     <form
       onSubmit={onSubmit}
       aria-label="Edit prompt metadata"
-      className="space-y-3 rounded border border-neutral-300 p-4 dark:border-neutral-700"
+      className={`space-y-3 p-4 ${card}`}
     >
-      <h3 className="text-sm font-semibold">Edit prompt metadata</h3>
+      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+        Edit prompt metadata
+      </h3>
       <InfoNote>
         Editing metadata does not create a new version. Prompt content lives in
         versions and stays unchanged.
@@ -84,26 +87,32 @@ export function EditMetadataForm({
         value={purpose}
         onChange={(e) => setPurpose(e.target.value)}
       />
-      <fieldset>
-        <legend className="text-sm font-medium">Visibility</legend>
-        <label className="mr-4 inline-flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name="visibility"
-            checked={!isPublic}
-            onChange={() => setIsPublic(false)}
-          />
-          Private
-        </label>
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name="visibility"
-            checked={isPublic}
-            onChange={() => setIsPublic(true)}
-          />
-          Public
-        </label>
+      <fieldset className="space-y-1.5">
+        <legend className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+          Visibility
+        </legend>
+        <div className="flex gap-4">
+          <label className="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+            <input
+              type="radio"
+              name="visibility"
+              checked={!isPublic}
+              onChange={() => setIsPublic(false)}
+              className="accent-indigo-600"
+            />
+            Private
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+            <input
+              type="radio"
+              name="visibility"
+              checked={isPublic}
+              onChange={() => setIsPublic(true)}
+              className="accent-indigo-600"
+            />
+            Public
+          </label>
+        </div>
       </fieldset>
       {error && <ErrorBox message={error} />}
       <div className="flex gap-2">

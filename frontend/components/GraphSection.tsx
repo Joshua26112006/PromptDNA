@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { friendlyMessage, getPromptGraph } from "@/lib/api";
 import type { GraphRelationship, GraphResponse } from "@/lib/types";
 
-import { Spinner } from "./ui";
+import { GitBranchIcon } from "./icons";
+import { card, Spinner } from "./ui";
 
 const ARROW: Record<string, string> = {
   DERIVED_FROM: "derived from",
@@ -22,15 +23,18 @@ function RelRow({ r }: { r: GraphRelationship }) {
         : `← ${ARROW[r.type] ?? r.type} this prompt`
       : (r.rel_types ?? []).join(" → ") || "connected";
   return (
-    <li className="flex flex-wrap items-center gap-2 py-1 text-sm">
-      <span className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] font-semibold text-neutral-600 dark:border-neutral-700 dark:text-neutral-300">
+    <li className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
+      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-800/60 dark:bg-indigo-950/40 dark:text-indigo-300">
         {label}
       </span>
-      <Link href={`/prompts/${r.prompt_id}`} className="underline">
+      <Link
+        href={`/prompts/${r.prompt_id}`}
+        className="font-medium text-neutral-800 underline decoration-neutral-300 underline-offset-2 hover:text-indigo-600 hover:decoration-indigo-400 dark:text-neutral-200 dark:hover:text-indigo-400"
+      >
         {r.title}
       </Link>
       {r.depth > 1 && (
-        <span className="text-xs text-neutral-500">(depth {r.depth})</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">(depth {r.depth})</span>
       )}
     </li>
   );
@@ -75,9 +79,12 @@ export function GraphSection({ promptId }: { promptId: string }) {
   }, [promptId]);
 
   return (
-    <section aria-label="Prompt Relationships" className="space-y-2">
-      <h2 className="text-sm font-semibold">Prompt Relationships (Knowledge Graph)</h2>
-      <p className="text-xs text-neutral-500">
+    <section aria-label="Prompt Relationships" className={`space-y-3 p-4 ${card}`}>
+      <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+        <GitBranchIcon className="h-4 w-4 text-neutral-400" />
+        Prompt Relationships (Knowledge Graph)
+      </h2>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
         Explicit connections between prompts (derived / forked / depends‑on),
         traversed in Neo4j. This is different from semantic search, which finds
         prompts with <em>similar meaning</em>.
@@ -85,40 +92,40 @@ export function GraphSection({ promptId }: { promptId: string }) {
 
       {state === "loading" && <Spinner label="Loading graph…" />}
       {state === "unavailable" && (
-        <p className="rounded border border-dashed border-neutral-300 p-3 text-sm text-neutral-500 dark:border-neutral-700">
+        <p className="rounded-lg border border-dashed border-neutral-300 p-3 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
           Graph relationships unavailable.
         </p>
       )}
 
       {state === "ok" && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div>
-            <p className="text-xs font-medium text-neutral-500">Ancestry</p>
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Ancestry</p>
             {ancestors && ancestors.relationships.length > 0 ? (
-              <ol className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ol className="mt-1 divide-y divide-neutral-100 dark:divide-neutral-800">
                 {ancestors.relationships.map((r) => (
                   <RelRow key={`a-${r.prompt_id}`} r={r} />
                 ))}
               </ol>
             ) : (
-              <p className="text-sm text-neutral-500">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 No ancestor prompts — this prompt is a root.
               </p>
             )}
           </div>
 
           <div>
-            <p className="text-xs font-medium text-neutral-500">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
               Directly connected
             </p>
             {related && related.relationships.length > 0 ? (
-              <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ul className="mt-1 divide-y divide-neutral-100 dark:divide-neutral-800">
                 {related.relationships.map((r) => (
                   <RelRow key={`r-${r.prompt_id}-${r.type}`} r={r} />
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-neutral-500">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 No connected prompts in the graph.
               </p>
             )}
