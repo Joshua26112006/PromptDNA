@@ -46,7 +46,11 @@ See [`docs/architecture.md`](docs/architecture.md),
 | Graph            | Neo4j                           |
 | Migrations       | Alembic                         |
 
-Deployment (later, not configured now): Vercel, Neon, Neo4j Aura.
+Deployment target: **Vercel** (frontend) + **Railway** (FastAPI backend,
+Docker) + **Neon** (PostgreSQL/pgvector) + **Neo4j Aura** (graph). Config is
+ready (`backend/Dockerfile`, `backend/railway.toml`); creating the actual
+cloud accounts/projects is a manual, account-specific step — see
+[`docs/deployment.md`](docs/deployment.md) for the exact walkthrough.
 
 ## Repository structure
 

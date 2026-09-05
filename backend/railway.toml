@@ -1,0 +1,13 @@
+# Railway service config for the PromptDNA backend.
+# In the Railway dashboard, set this service's "Root Directory" to `backend`
+# so it finds this file and the Dockerfile next to it.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
