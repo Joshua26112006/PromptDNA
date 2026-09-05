@@ -46,11 +46,13 @@ See [`docs/architecture.md`](docs/architecture.md),
 | Graph            | Neo4j                           |
 | Migrations       | Alembic                         |
 
-Deployment target: **Vercel** (frontend) + **Railway** (FastAPI backend,
-Docker) + **Neon** (PostgreSQL/pgvector) + **Neo4j Aura** (graph). Config is
-ready (`backend/Dockerfile`, `backend/railway.toml`); creating the actual
-cloud accounts/projects is a manual, account-specific step — see
-[`docs/deployment.md`](docs/deployment.md) for the exact walkthrough.
+Deployment target: **Vercel** (frontend) + **Render** (FastAPI backend,
+Docker, free tier) + **Neon** (PostgreSQL/pgvector) + **Neo4j Aura** (graph).
+Config is ready (`backend/Dockerfile`, `render.yaml`; `backend/railway.toml`
+also works if you'd rather pay for an always-warm backend on Railway);
+creating the actual cloud accounts/projects is a manual, account-specific
+step — see [`docs/deployment.md`](docs/deployment.md) for the exact
+walkthrough.
 
 ## Repository structure
 
