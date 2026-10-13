@@ -392,7 +392,14 @@ def test_experiment_requires_auth_for_retrieval(client, user_a, db_session, use_
 # --------------------------------------------------------------------------- #
 # GET /models                                                               #
 # --------------------------------------------------------------------------- #
-def test_models_endpoint_reports_execution_configured(client, user_a, db_session):
+def test_models_endpoint_reports_execution_configured(client, user_a, db_session, monkeypatch):
+    # Pin the real OpenAI endpoint + no key so a developer's local .env (e.g. a
+    # localhost Ollama OPENAI_BASE_URL) cannot change what this test asserts.
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    get_settings.cache_clear()
     make_model(db_session, name="Echo", provider="mock")
     make_model(db_session, name="GPT-5", provider="OpenAI")
     rows = client.get("/api/v1/models", headers=user_a.headers).json()
@@ -400,6 +407,7 @@ def test_models_endpoint_reports_execution_configured(client, user_a, db_session
     assert by_name["Echo"]["execution_configured"] is True     # mock provider on
     assert by_name["GPT-5"]["execution_configured"] is False    # no OPENAI_API_KEY
     assert "api_key" not in str(rows).lower()
+    get_settings.cache_clear()
 
 
 def test_models_endpoint_requires_auth(client):

@@ -100,6 +100,31 @@ python -m venv .venv
   `PROMPTDNA_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/promptdna_test ./.venv/Scripts/python.exe -m pytest`
 - Full endpoint reference: [`docs/api.md`](docs/api.md)
 
+#### Local Ollama Development (optional)
+
+Ollama is optional and runs entirely on your machine. PromptDNA reaches it through the
+existing OpenAI-compatible provider (no new provider): when `OPENAI_BASE_URL` points at
+localhost, no API key is required and no `Authorization` header is sent. A non-local URL
+(including the OpenAI default) still requires `OPENAI_API_KEY`, exactly as before.
+
+Supported local models (the `models.name` must equal the Ollama tag exactly): `gemma3:4b`, `qwen3:4b`.
+
+```bash
+ollama list                                   # confirm both models are installed
+# .env (local only):
+#   OPENAI_BASE_URL=http://localhost:11434/v1
+#   EXPERIMENT_PROVIDER_TIMEOUT_S=300          # 4B models on CPU can take 20s+ per call
+cd backend
+PYTHONPATH=. ./.venv/Scripts/python.exe scripts/seed_local_models.py   # idempotent; adds the 2 model rows
+# restart the backend, then run an experiment from a prompt's detail page (or the API)
+```
+
+`GET /api/v1/models` then reports both as `execution_configured: true`. Outputs from these
+runs are real local model outputs, stored in `experiments` like any other run. The `mock`
+provider stays available for deterministic testing. Note: while `OPENAI_BASE_URL` is local,
+every model row with provider `openai` (including the seeded "GPT-5") reports as configured
+but is executed against Ollama, so only the two models above will actually succeed.
+
 ### 3. Frontend (Node 20+)
 
 ```bash

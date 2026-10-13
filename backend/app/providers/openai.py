@@ -1,8 +1,14 @@
 """OpenAI Chat Completions provider.
 
-Real integration. Only ever runs when ``OPENAI_API_KEY`` is set — otherwise
+Real integration. Runs when ``OPENAI_API_KEY`` is set — otherwise
 :meth:`is_configured` returns False and the experiment service refuses the run
 with a clean configuration error (no experiment row created, no key logged).
+
+**Local Ollama / OpenAI-compatible servers:** if ``OPENAI_BASE_URL`` points at
+this machine (localhost / 127.0.0.1 / ::1) no API key is required, and no
+``Authorization`` header is sent unless a key is set. A non-local base URL
+(including the OpenAI default) still requires ``OPENAI_API_KEY`` exactly as
+before.
 
 Adding Anthropic / Google providers is the same shape: a subclass with its own
 ``is_configured`` + ``generate``, registered in ``registry.py``.
@@ -11,6 +17,7 @@ Adding Anthropic / Google providers is the same shape: a subclass with its own
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 import httpx
 
@@ -25,6 +32,16 @@ from app.providers.base import (
 logger = logging.getLogger("promptdna")
 
 _MAX_ERROR_LEN = 300
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _is_local_endpoint(base_url: str) -> bool:
+    """True if ``base_url`` targets this machine (e.g. a local Ollama server)."""
+
+    try:
+        return (urlparse(base_url).hostname or "").lower() in _LOCAL_HOSTS
+    except ValueError:
+        return False
 
 
 class OpenAIProvider(LLMProvider):
@@ -32,12 +49,15 @@ class OpenAIProvider(LLMProvider):
     label = "OpenAI"
 
     def is_configured(self) -> bool:
-        return bool(get_settings().openai_api_key)
+        settings = get_settings()
+        return bool(settings.openai_api_key) or _is_local_endpoint(
+            settings.openai_base_url
+        )
 
     def generate(self, *, model_name: str, prompt_text: str, timeout_s: float) -> str:
         settings = get_settings()
         api_key = settings.openai_api_key
-        if not api_key:
+        if not api_key and not _is_local_endpoint(settings.openai_base_url):
             raise ProviderNotConfigured(
                 "OpenAI execution is not configured on this server."
             )
@@ -47,12 +67,13 @@ class OpenAIProvider(LLMProvider):
             "model": model_name,
             "messages": [{"role": "user", "content": prompt_text}],
         }
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         try:
             with httpx.Client(timeout=timeout_s) as client:
                 resp = client.post(
                     url,
                     json=payload,
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    headers=headers,
                 )
         except httpx.TimeoutException as exc:
             raise ProviderTimeout(
