@@ -62,7 +62,8 @@ Do these in order — each later step needs a value produced by the one before:
      (the driver auto-detects the `neo4j+s://` scheme; no code change needed)
    - username `neo4j` → **`NEO4J_USERNAME`**
    - password → **`NEO4J_PASSWORD`**
-   - database name is fixed to `neo4j` → **`NEO4J_DATABASE`**
+   - database name → **`NEO4J_DATABASE`**. Copy it from the credentials file: newer Aura
+     instances use the instance id (same as the username), **not** `neo4j`
 3. Wait for the instance status to show **Running**.
 4. Nothing else to do: the backend's startup hook calls `init_schema()`
    (creates the `prompt_id_unique` constraint) automatically, and it's
@@ -87,6 +88,7 @@ create and pre-configure the service for you:
    | `NEO4J_URI` | the Aura URI from step 2 |
    | `NEO4J_USERNAME` | `neo4j` |
    | `NEO4J_PASSWORD` | the Aura password from step 2 |
+   | `NEO4J_DATABASE` | the database name from the Aura credentials file (often the instance id, not `neo4j`) |
    | `CORS_ORIGINS` | *(temporary)* `https://placeholder.vercel.app` — you'll replace this in step 5 |
    | `JWT_SECRET_KEY` | a **new** strong secret — generate one yourself: `python -c "import secrets; print(secrets.token_urlsafe(64))"`. **Never reuse a value from any local `.env`.** |
 

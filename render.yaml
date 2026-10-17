@@ -24,12 +24,14 @@ services:
         sync: false
       - key: NEO4J_PASSWORD
         sync: false
+      # Aura instances created after 2025 name the database after the instance id
+      # (see the NEO4J_DATABASE line in the downloaded credentials file), not "neo4j".
+      - key: NEO4J_DATABASE
+        sync: false
       - key: CORS_ORIGINS
         sync: false
 
       # --- fixed application config (safe to store in the blueprint) ---
-      - key: NEO4J_DATABASE
-        value: neo4j
       - key: NEO4J_ENABLED
         value: "true"
       - key: PGVECTOR_ENABLED
