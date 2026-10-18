@@ -19,6 +19,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`h-full antialiased ${inter.variable}`}>
       <body className="min-h-full flex flex-col bg-surface text-ink">
+        <div className="aurora" aria-hidden>
+          <span className="blob blob-a" />
+          <span className="blob blob-b" />
+          <span className="blob blob-c" />
+        </div>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

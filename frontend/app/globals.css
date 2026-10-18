@@ -4,76 +4,50 @@
    PromptDNA design tokens
    ---------------------------------------------------------------------------
    Semantic tokens (surface / panel / line / ink / accent / status) are declared
-   as plain CSS variables so they can flip with `prefers-color-scheme`, then
+   as plain CSS variables, then
    exposed to Tailwind via `@theme inline` — which is what generates the
    `bg-panel`, `text-ink-muted`, `border-line` … utilities used across the app.
    Components reference the semantic name, never a raw palette step, so the
    whole product re-themes from this one block.
    =========================================================================== */
 
+/* Dark-first "glow" theme. The whole product re-themes from this one block;
+   components only ever reference the semantic names. */
 :root {
+  color-scheme: dark;
+
   /* surfaces */
-  --surface: #fbfbfd; /* page background */
-  --panel: #ffffff; /* raised cards / panels */
-  --panel-muted: #f5f6f9; /* inset areas: code, output, wells */
-  --line: #e6e8ee; /* hairlines, card borders */
-  --line-strong: #d2d7e0; /* emphasised dividers, input borders */
+  --surface: #05060d; /* page background (under the aurora) */
+  --panel: #0d1021; /* raised cards / panels */
+  --panel-muted: #141836; /* inset areas: code, output, wells */
+  --line: #232847; /* hairlines, card borders */
+  --line-strong: #353c6b; /* emphasised dividers, input borders */
 
   /* text */
-  --ink: #14161a; /* primary content */
-  --ink-muted: #5a6372; /* secondary / metadata */
-  --ink-subtle: #8b94a3; /* tertiary / placeholder */
+  --ink: #eef0ff; /* primary content */
+  --ink-muted: #a6acd0; /* secondary / metadata */
+  --ink-subtle: #7078a0; /* tertiary / placeholder */
 
-  /* brand accent — violet: reads technical/intelligent and stays clear of the
-     semantic green/amber/red used for status */
-  --accent: #6d28d9; /* accent text + icons on light surfaces */
-  --accent-solid: #6d28d9; /* filled buttons */
-  --accent-solid-hover: #5b21b6;
-  --accent-soft: #f3f0ff; /* tinted backgrounds */
-  --accent-line: #ddd4fb; /* borders on tinted backgrounds */
-  --accent-ink: #5b21b6; /* text on tinted backgrounds */
+  /* brand accent — electric violet, with cyan + pink as gradient partners */
+  --accent: #b39dff; /* accent text + icons on dark surfaces */
+  --accent-solid: #7c3aed; /* filled buttons */
+  --accent-solid-hover: #8b5cf6;
+  --accent-soft: #1b1745; /* tinted backgrounds */
+  --accent-line: #43398f; /* borders on tinted backgrounds */
+  --accent-ink: #cfc3ff; /* text on tinted backgrounds */
+  --glow-cyan: #22d3ee;
+  --glow-pink: #f472b6;
 
   /* status */
-  --ok: #047857;
-  --ok-soft: #ecfdf5;
-  --ok-line: #a7f3d0;
-  --warn: #b45309;
-  --warn-soft: #fffbeb;
-  --warn-line: #fde68a;
-  --danger: #b91c1c;
-  --danger-soft: #fef2f2;
-  --danger-line: #fecaca;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #0a0c10;
-    --panel: #13161c;
-    --panel-muted: #191d24;
-    --line: #262b34;
-    --line-strong: #333a45;
-
-    --ink: #e9edf4;
-    --ink-muted: #98a2b1;
-    --ink-subtle: #6a7381;
-
-    --accent: #a78bfa;
-    --accent-solid: #6d28d9;
-    --accent-solid-hover: #7c3aed;
-    --accent-soft: #1c1633;
-    --accent-line: #3b2f66;
-    --accent-ink: #c4b5fd;
-
-    --ok: #34d399;
-    --ok-soft: #062a20;
-    --ok-line: #10513c;
-    --warn: #fbbf24;
-    --warn-soft: #2a1e05;
-    --warn-line: #5a3f0a;
-    --danger: #f87171;
-    --danger-soft: #2b1112;
-    --danger-line: #5c1f22;
-  }
+  --ok: #34d399;
+  --ok-soft: #062a20;
+  --ok-line: #10513c;
+  --warn: #fbbf24;
+  --warn-soft: #2a1e05;
+  --warn-line: #5a3f0a;
+  --danger: #f87171;
+  --danger-soft: #2b1112;
+  --danger-line: #5c1f22;
 }
 
 @theme inline {
@@ -123,4 +97,161 @@ body {
 /* Tabular figures for counts/durations/scores so numeric columns don't jitter. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* ===========================================================================
+   Visual effects: aurora backdrop, glass, gradient text, helix, reveal
+   =========================================================================== */
+
+body {
+  background-color: var(--surface);
+  overflow-x: hidden;
+}
+
+/* Fixed, non-interactive backdrop mounted once in the root layout. */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 700px at 12% -10%, rgba(124, 58, 237, 0.28), transparent 60%),
+    radial-gradient(900px 600px at 95% 5%, rgba(34, 211, 238, 0.16), transparent 60%),
+    radial-gradient(900px 700px at 50% 115%, rgba(244, 114, 182, 0.14), transparent 60%),
+    var(--surface);
+}
+.aurora::before {
+  /* fine dot grid, faded toward the edges */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(190, 200, 255, 0.16) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 72%);
+}
+.aurora .blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.5;
+  will-change: transform;
+}
+.aurora .blob-a {
+  width: 38rem; height: 38rem; left: -10rem; top: 8%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.55), transparent 65%);
+  animation: drift-a 26s ease-in-out infinite alternate;
+}
+.aurora .blob-b {
+  width: 34rem; height: 34rem; right: -8rem; top: 38%;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.4), transparent 65%);
+  animation: drift-b 32s ease-in-out infinite alternate;
+}
+.aurora .blob-c {
+  width: 30rem; height: 30rem; left: 35%; bottom: -12rem;
+  background: radial-gradient(circle, rgba(244, 114, 182, 0.35), transparent 65%);
+  animation: drift-a 38s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(9rem, 5rem, 0) scale(1.18); }
+}
+@keyframes drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.1); }
+  to { transform: translate3d(-8rem, -6rem, 0) scale(0.92); }
+}
+
+/* Glass panel */
+.glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  border: 1px solid rgba(160, 170, 255, 0.16);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 20px 50px -24px rgba(0, 0, 0, 0.7);
+}
+
+/* Gradient headline text */
+.text-gradient {
+  background: linear-gradient(100deg, #ffffff 0%, #cfc3ff 35%, #67e8f9 70%, #f9a8d4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% auto;
+  animation: sheen 9s linear infinite;
+}
+@keyframes sheen {
+  to { background-position: 200% center; }
+}
+
+/* Glowing gradient border for hero visual / featured cards */
+/* (the host element must be positioned: use `relative` or `absolute`) */
+.glow-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.9), rgba(34, 211, 238, 0.5), rgba(244, 114, 182, 0.6));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* DNA helix: each rung is scaled on X through a cosine-like cycle, staggered by
+   an inline negative animation-delay, which reads as a rotating double helix. */
+.helix-rung {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: helix-spin 5s linear infinite;
+}
+@keyframes helix-spin {
+  0% { transform: scaleX(1); }
+  25% { transform: scaleX(0.02); }
+  50% { transform: scaleX(-1); }
+  75% { transform: scaleX(0.02); }
+  100% { transform: scaleX(1); }
+}
+.helix-float {
+  animation: float-y 7s ease-in-out infinite alternate;
+}
+@keyframes float-y {
+  from { transform: translateY(-8px); }
+  to { transform: translateY(10px); }
+}
+
+/* Animated dashed edge (lineage graph) */
+.edge-flow {
+  stroke-dasharray: 6 7;
+  animation: edge-flow 1.4s linear infinite;
+}
+@keyframes edge-flow {
+  to { stroke-dashoffset: -26; }
+}
+.node-pulse {
+  animation: node-pulse 3.2s ease-in-out infinite;
+}
+@keyframes node-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Scroll-in reveal (armed by components/landing/Reveal.tsx). Content is visible
+   by default; it is only hidden once JS has armed an element that is confirmed
+   to be below the fold, so a slow/blocked script can never leave a blank page. */
+.reveal {
+  transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.reveal.reveal-armed:not(.is-visible) {
+  opacity: 0;
+  transform: translateY(18px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora .blob, .text-gradient, .helix-rung, .helix-float, .edge-flow, .node-pulse {
+    animation: none !important;
+  }
+  .reveal, .reveal.reveal-armed:not(.is-visible) { opacity: 1; transform: none; transition: none; }
 }

@@ -31,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
 
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-line bg-surface/55 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
           <Link href="/prompts" className={`rounded-lg ${focusRing}`} aria-label="PromptDNA home">
             <Wordmark />
@@ -82,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      <footer className="border-t border-line">
+      <footer className="border-t border-line bg-surface/40 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-ink-subtle sm:px-6">
           <span>PromptDNA — prompt lineage, experiments and retrieval.</span>
           <span className="flex items-center gap-1.5">

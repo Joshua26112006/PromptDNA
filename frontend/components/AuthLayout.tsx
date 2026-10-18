@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { BranchIcon, LayersIcon, SparklesIcon } from "./icons";
+import { DnaHelix } from "./landing/DnaHelix";
 import { Wordmark } from "./Wordmark";
 
 const PILLARS = [
@@ -32,7 +33,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       {/* Story pane */}
       <section
         aria-label="About PromptDNA"
-        className="relative hidden overflow-hidden border-r border-line bg-panel px-10 py-12 lg:flex lg:flex-col lg:justify-center"
+        className="relative hidden overflow-hidden border-r border-white/5 bg-black/20 px-10 py-12 backdrop-blur-sm lg:flex lg:flex-col lg:justify-center"
       >
         <div
           aria-hidden
@@ -40,12 +41,15 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute -left-24 top-1/4 h-72 w-72 rounded-full bg-accent-soft blur-3xl"
+          className="pointer-events-none absolute -left-24 top-1/4 h-72 w-72 rounded-full bg-violet-600/25 blur-3xl"
         />
+        <div aria-hidden className="pointer-events-none absolute -right-6 top-0 h-full w-40 opacity-60">
+          <DnaHelix rungs={22} className="h-full w-full" />
+        </div>
 
         <div className="relative max-w-md">
           <Wordmark size="lg" />
-          <h2 className="mt-8 text-3xl font-semibold leading-tight tracking-tight text-ink">
+          <h2 className="text-gradient mt-8 text-4xl font-semibold leading-tight tracking-tight">
             A knowledge base for the prompts you actually rely on.
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-ink-muted">
@@ -76,7 +80,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <div className="mb-8 lg:hidden">
             <Wordmark size="lg" />
           </div>
-          {children}
+          <div className="glass glow-border relative rounded-2xl p-7 sm:p-8">{children}</div>
         </div>
       </section>
     </main>

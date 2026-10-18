@@ -23,15 +23,16 @@ type IconType = ComponentType<SVGProps<SVGSVGElement>>;
  * ----------------------------------------------------------------------- */
 
 /** Raised panel: the default container for a block of content. */
-export const card = "rounded-xl border border-line bg-panel";
+export const card =
+  "rounded-xl border border-line bg-panel/65 backdrop-blur-md shadow-[0_1px_0_rgba(255,255,255,0.05)_inset,0_18px_40px_-26px_rgba(0,0,0,0.8)]";
 
 /** Panel that is itself a link/button — adds hover affordance. */
 export const cardInteractive =
   card +
-  " transition duration-150 hover:border-line-strong hover:shadow-[0_1px_2px_rgba(16,18,24,0.04),0_8px_24px_-12px_rgba(16,18,24,0.18)]";
+  " transition duration-200 hover:-translate-y-0.5 hover:border-accent-line hover:bg-panel/80 hover:shadow-[0_0_0_1px_rgba(124,58,237,0.35),0_18px_50px_-16px_rgba(124,58,237,0.55)]";
 
 /** Inset well for code, model output, and other verbatim technical text. */
-export const well = "rounded-lg border border-line bg-panel-muted";
+export const well = "rounded-lg border border-line bg-black/30";
 
 export const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
@@ -47,11 +48,11 @@ const buttonBase =
 
 export const buttonPrimary =
   buttonBase +
-  " bg-accent-solid text-white shadow-sm hover:bg-accent-solid-hover active:scale-[0.985]";
+  " bg-gradient-to-r from-violet-600 via-indigo-500 to-cyan-500 text-white shadow-[0_0_28px_-6px_rgba(124,58,237,0.85)] hover:brightness-110 hover:shadow-[0_0_38px_-4px_rgba(139,92,246,0.95)] active:scale-[0.985]";
 
 export const buttonSecondary =
   buttonBase +
-  " border border-line-strong bg-panel text-ink hover:bg-panel-muted active:scale-[0.985]";
+  " border border-line-strong bg-white/5 text-ink backdrop-blur hover:border-accent-line hover:bg-white/10 active:scale-[0.985]";
 
 export const buttonGhost =
   buttonBase + " text-ink-muted hover:bg-panel-muted hover:text-ink";
